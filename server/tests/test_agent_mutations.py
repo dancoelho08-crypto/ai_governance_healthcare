@@ -31,6 +31,7 @@ from .conftest import DB_URL, requires_db
 pytestmark = [requires_db, pytest.mark.db]
 
 SERVER = Path(__file__).resolve().parents[1]
+LIM = "tests/test_agent_limits.py"
 
 
 @dataclass(frozen=True)
@@ -402,16 +403,6 @@ MUTANTS: tuple[Mutant, ...] = (
         ("test_an_agent_token_has_its_own_lower_limit",),
     ),
     Mutant(
-        "the failure bucket is not applied",
-        "app/agent.py",
-        "if not guard.charge_failure(source):",
-        "if not (guard.charge_failure(source) or True):",
-        (
-            "test_a_flood_of_bad_tokens_writes_nothing_and_never_blocks_a_real_token",
-            "test_the_source_is_the_peer_and_not_a_header_a_client_chooses",
-        ),
-    ),
-    Mutant(
         "a failure names a token and spends its allowance",
         "app/agent.py",
         "    source = client_address(request, settings)\n",
@@ -434,46 +425,12 @@ MUTANTS: tuple[Mutant, ...] = (
         ),
     ),
     Mutant(
-        "a known token's refusals are unbounded rows",
-        "app/agent.py",
-        "        and await guard.may_write_row(presented.token_id, source)\n",
-        "",
-        (
-            "test_a_flood_of_bad_tokens_writes_nothing_and_never_blocks_a_real_token",
-            "test_nobody_can_spend_another_tokens_allowance_by_naming_it",
-        ),
-    ),
-    Mutant(
         "the source is taken from X-Forwarded-For",
         "app/agent.py",
         "    source = client_address(request, settings)\n",
         "    source = request.headers.get('x-forwarded-for') or client_address(\n"
         "        request, settings\n    )\n",
         ("test_the_source_is_the_peer_and_not_a_header_a_client_chooses",),
-    ),
-    Mutant(
-        "X-Real-IP is believed from any peer",
-        "app/auth.py",
-        "    if not peer or not settings.trusted_proxy_cidrs:\n        return peer",
-        "    if not peer:\n        return peer",
-        (
-            "test_the_source_is_the_peer_and_not_a_header_a_client_chooses",
-            "test_the_proxys_address_is_believed_only_inside_the_trusted_range",
-        ),
-        extra=(
-            (
-                "app/auth.py",
-                "    if not any(ip in net for net in _networks(settings.trusted_proxy_cidrs)):\n        return peer",
-                "    if False:\n        return peer",
-            ),
-        ),
-    ),
-    Mutant(
-        "X-Real-IP is believed from a peer outside the range",
-        "app/auth.py",
-        "    if not any(ip in net for net in _networks(settings.trusted_proxy_cidrs)):\n        return peer",
-        "    if False:\n        return peer",
-        ("test_the_proxys_address_is_believed_only_inside_the_trusted_range",),
     ),
     Mutant(
         "a token is accepted from a query parameter",
@@ -538,6 +495,234 @@ MUTANTS: tuple[Mutant, ...] = (
         suite="tests/test_agent_vocabulary.py",
     ),
     Mutant(
+        "the failure bucket is not applied",
+        "app/agent.py",
+        "    if guard.charge_failure(source) is not FailureVerdict.ALLOW:\n        raise _too_many(guard.window)",
+        "    guard.charge_failure(source)",
+        (
+            "test_a_flood_of_bad_tokens_writes_nothing_and_never_blocks_a_real_token",
+            "test_the_source_is_the_peer_and_not_a_header_a_client_chooses",
+        ),
+    ),
+    Mutant(
+        "a known token's refusals are unbounded rows",
+        "app/agent.py",
+        "        and guard.may_write_row(kind, presented.token_id)\n",
+        "",
+        (
+            "test_wrong_secret_rows_are_bounded_per_token_across_every_source",
+            "test_nobody_can_spend_another_tokens_allowance_by_naming_it",
+        ),
+    ),
+    Mutant(
+        "X-Real-IP is believed from any peer",
+        "app/auth.py",
+        "    if not settings.trusted_proxy_cidrs:\n        return str(ip)\n"
+        "    if not any(ip in net for net in _networks(settings.trusted_proxy_cidrs)):\n"
+        "        return str(ip)\n",
+        "",
+        (
+            "test_the_source_is_the_peer_and_not_a_header_a_client_chooses",
+            "test_the_proxys_address_is_believed_only_inside_the_trusted_range",
+        ),
+    ),
+    Mutant(
+        "X-Real-IP is believed from a peer outside the range",
+        "app/auth.py",
+        "    if not any(ip in net for net in _networks(settings.trusted_proxy_cidrs)):\n        return str(ip)",
+        "    if False:\n        return str(ip)",
+        ("test_the_proxys_address_is_believed_only_inside_the_trusted_range",),
+    ),
+    Mutant(
+        "a source that is not an address is used as it came",
+        "app/auth.py",
+        '    except ValueError:\n        return "unknown"',
+        "    except ValueError:\n        return peer",
+        ("test_the_source_is_always_an_address_or_unknown",),
+    ),
+    Mutant(
+        "uvicorn is started trusting proxy headers",
+        "Dockerfile",
+        "--no-proxy-headers ",
+        "",
+        ("test_uvicorn_is_started_without_proxy_headers_and_that_matters",),
+    ),
+    Mutant(
+        "a person's tokens do not share an allowance",
+        "app/agent.py",
+        "if not await guard.allow_user(verified.caller.user_id):",
+        "if False:",
+        ("test_a_persons_tokens_share_one_allowance",),
+    ),
+    Mutant(
+        "a project that is not visible is an unbounded row",
+        "app/agent.py",
+        "if guard.may_write_row(RowKind.NOT_VISIBLE, caller.token_id):",
+        "if True:",
+        ("test_a_valid_tokens_unknown_refs_write_a_bounded_number_of_rows",),
+    ),
+    Mutant(
+        "a stopped token's refusals share the wrong-secret budget",
+        "app/agent.py",
+        "        if verified.refusal in (Refusal.REVOKED, Refusal.EXPIRED)\n",
+        "        if False\n",
+        ("test_a_flood_of_wrong_secrets_cannot_starve_the_holders_own_refusals",),
+    ),
+    Mutant(
+        "a row budget has no per-token cap",
+        "app/agent_limits.py",
+        "        if w.count >= self.per_key or self._all.count >= self.overall:",
+        "        if self._all.count >= self.overall:",
+        (
+            "test_wrong_secret_rows_are_bounded_per_token_across_every_source",
+            "test_a_valid_tokens_unknown_refs_write_a_bounded_number_of_rows",
+        ),
+    ),
+    Mutant(
+        "a row budget has no overall cap",
+        "app/agent_limits.py",
+        "        if w.count >= self.per_key or self._all.count >= self.overall:",
+        "        if w.count >= self.per_key:",
+        ("test_wrong_secret_rows_are_bounded_overall",),
+    ),
+    Mutant(
+        "the source table has no cap",
+        "app/agent_limits.py",
+        "            while len(self._by_source) >= self.max_sources:",
+        "            while False:",
+        (
+            "test_the_table_never_exceeds_its_cap_and_evicts_the_oldest_idle",
+            "test_a_hundred_thousand_sources_cost_a_bounded_time_and_memory",
+        ),
+        suite=LIM,
+    ),
+    Mutant(
+        "a failure window never closes",
+        "app/agent_limits.py",
+        "        elif now - w.start >= self.window:",
+        "        elif False:",
+        ("test_a_window_that_closes_starts_again",),
+        suite=LIM,
+    ),
+    Mutant(
+        "an active attackers bucket is not kept fresh",
+        "app/agent_limits.py",
+        "        self._by_source.move_to_end(source)",
+        "        pass",
+        ("test_an_active_attackers_bucket_survives_the_evictions_it_causes",),
+        suite=LIM,
+    ),
+    Mutant(
+        "the global failure budget is not applied",
+        "app/agent_limits.py",
+        "        if self._global.count > self.global_limit:",
+        "        if False:",
+        ("test_past_the_global_budget_nothing_is_accounted_per_source",),
+        suite=LIM,
+    ),
+    Mutant(
+        "the summary is not written at shutdown",
+        "app/agent_limits.py",
+        "        self.flush(everything=True)",
+        "        pass",
+        ("test_stopping_writes_what_is_still_open",),
+        suite=LIM,
+    ),
+    Mutant(
+        "the summary task is never started",
+        "app/agent_limits.py",
+        "            self._task = asyncio.get_running_loop().create_task(self._run())",
+        "            self._task = None",
+        ("test_the_task_writes_the_summary_at_the_window_close_by_itself",),
+        suite=LIM,
+    ),
+    Mutant(
+        "the summary is written line by line per source",
+        "app/agent_limits.py",
+        "        if not everything and now - self._last_summary < self.window:\n            return  # one summary per window",
+        "        pass",
+        ("test_the_summary_is_written_when_the_window_closes_and_not_before",),
+        suite=LIM,
+    ),
+    Mutant(
+        "the limiter never sweeps its stale keys",
+        "app/ratelimit.py",
+        "            if now - self._last_sweep >= self.window_seconds:",
+        "            if False:",
+        ("test_the_limiter_sweeps_the_keys_a_window_leaves_behind",),
+        suite=LIM,
+    ),
+    Mutant(
+        "a document key equal to a non-supplement is a supplement",
+        "app/agent.py",
+        "if vocab.role(k) is FrameworkRole.SUPPLEMENT",
+        "if vocab.role(k) is not None",
+        ("test_a_document_key_that_is_the_primary_framework_is_not_a_supplement",),
+    ),
+    Mutant(
+        "a short secret is accepted",
+        "app/config.py",
+        "    if len(value) < AGENT_ID_SECRET_MIN_LENGTH:",
+        "    if False:",
+        ("test_a_weak_secret_stops_the_server_starting",),
+    ),
+    Mutant(
+        "the API role may write the vocabulary",
+        "app/roles.py",
+        '    "agent_vocabulary": ("SELECT",),',
+        '    "agent_vocabulary": ("SELECT", "INSERT", "DELETE"),',
+        ("test_the_api_role_may_only_read_the_vocabulary",),
+        suite="tests/test_agent_vocabulary.py",
+    ),
+    Mutant(
+        "an invisible character in a word is accepted",
+        "app/retirement.py",
+        '        if category[0] == "C" or category in {"Zl", "Zp"}:',
+        "        if False:",
+        ("test_a_word_a_display_word_could_not_be_is_refused",),
+        suite="tests/test_agent_vocabulary.py",
+    ),
+    Mutant(
+        "a long word is accepted",
+        "app/retirement.py",
+        "                and len(word) <= MAX_VOCAB_WORD,",
+        "                and True,",
+        ("test_a_word_a_display_word_could_not_be_is_refused",),
+        suite="tests/test_agent_vocabulary.py",
+    ),
+    Mutant(
+        "a word with surrounding space is accepted",
+        "app/retirement.py",
+        "                and word == word.strip()\n",
+        "",
+        ("test_a_word_a_display_word_could_not_be_is_refused",),
+        suite="tests/test_agent_vocabulary.py",
+    ),
+    Mutant(
+        "a repeated JSON key is accepted",
+        "app/retirement.py",
+        "json.loads(text, object_pairs_hook=_no_duplicate_keys)",
+        "json.loads(text)",
+        ("test_a_repeated_json_key_is_refused_and_not_silently_resolved",),
+        suite="tests/test_agent_vocabulary.py",
+    ),
+    Mutant(
+        "too many words of a kind are accepted",
+        "app/retirement.py",
+        "            len(words) <= MAX_WORDS_PER_KIND,",
+        "            True,",
+        ("test_a_word_a_display_word_could_not_be_is_refused",),
+        suite="tests/test_agent_vocabulary.py",
+    ),
+    Mutant(
+        "too many words overall are accepted",
+        "app/retirement.py",
+        "        total <= MAX_WORDS_TOTAL,",
+        "        True,",
+        ("test_a_manifest_with_too_many_words_overall_is_refused",),
+        suite="tests/test_agent_vocabulary.py",
+    ),
+    Mutant(
         "a mint needs no signed-in person",
         "app/agent.py",
         "    if identity.id in NOT_PEOPLE or not settings.require_identity:",
@@ -555,7 +740,13 @@ def _copy_server(into: Path) -> Path:
     ):
         (into / name).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(SERVER.parent / name, into / name)
-    for name in ("docs/agent-api.md", "zensical.toml", ".env.example", "compose.yaml"):
+    for name in (
+        "docs/agent-api.md",
+        "zensical.toml",
+        ".env.example",
+        "compose.yaml",
+        "compose.dev.yaml",
+    ):
         (into / name).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(SERVER.parent / name, into / name)
     target = into / "server"

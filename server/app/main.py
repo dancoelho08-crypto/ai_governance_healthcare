@@ -287,12 +287,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.principals = PrincipalRecorder(db)
     app.state.db_role = db_role
     app.state.broker = broker
+    app.state.agent_guard.start()
     log.info("ready")
     try:
         yield
     finally:
         log.info("shutting down")
-        app.state.agent_guard.flush()
+        await app.state.agent_guard.stop()
         await broker.stop()
         await db.close()
 

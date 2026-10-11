@@ -2853,7 +2853,14 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
       and keeps no history: the words decide only what an agent may see and nothing
       about disposal, so a wrong load shows an agent less or more, never changes
       when
-      a record is destroyed; they are outside the rule-set hash, and the API
+      a record is destroyed; the manifest is trusted build output with the authority
+      of the definitions it is built from, and the loader is a shape and safety
+      filter
+      (no invisible, control or surrogate characters, 64 characters, 5,000 words
+      a
+      kind, no repeated JSON key) and not a judgment of content, so a poisoned
+      manifest could put text in front of agents; they are outside the rule-set
+      hash, and the API
       role may
       only read the table. A manifest with no words empties it, and an agent is
       shown
@@ -2884,13 +2891,24 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
       explicit opt-in, labeled untrusted text, as the issue says of free text.
     - Limits. The token is checked before anything is limited (one indexed read,
       no
-      write). A verified token spends only its own allowance; a failure spends only
-      its source's, up to a limit, after which failures are answered 429 with no
-      write; a failure is a read-trail row only when it names a token that exists,
-      at most five per token id and source per window; a flood of unknown tokens
-      leaves one aggregated `agent.failures` line per source per window. The source
-      is the socket peer, or the address the proxy reported when `TRUSTED_PROXY_CIDR`
-      is set and the peer is inside it, never a header a client chooses.
+      write). A verified token spends only its own allowance and its person's
+      (120 a
+      window across all that person's tokens). A failure spends only its source's
+      (30 a window, then 429 with no write) and a global budget (600 a window across
+      all sources, then 429 with no per-source accounting at all, so rotating source
+      keys cannot make the server work or log more). A failure is a read-trail row
+      only when it names a token that exists, within budgets by kind that cannot
+      starve each other: wrong secrets (which anybody who has seen a public id can
+      send) at most 10 per token id a window across all sources, a right secret
+      on a
+      stopped token and a project not visible 5 per token id, and 100 of each kind
+      overall. The tallies are bounded (10,000 sources, oldest idle dropped first,
+      never an active attacker's bucket reset) and O(1) per failure. What is not
+      written is one aggregated `agent.failures` line a window, written by a
+      background task every half window and at shutdown. The source is the socket
+      peer, or the address the proxy reported when `TRUSTED_PROXY_CIDR` is set and
+      the peer is inside it, validated as an IP address or `unknown`; the image
+      starts uvicorn with `--no-proxy-headers`.
     - Proxy. `proxy/Caddyfile` has a handle, above the sign-on one, that forwards
       only the three GET routes, deletes sixteen identity header names it knows
       and
@@ -2898,9 +2916,15 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
       defense in depth and is fixed), and answers anything else under the prefix
       with
       a 404. A request that slips through to a route that needs an identity arrives
-      with none and gets a 401. Caddy's log and uvicorn's access log drop the query
-      string of an agent route, so a token sent in a URL anyway is refused and not
-      written down by this stack.
+      with none and gets a 401. The API's access log drops the query string of a
+      request whose decoded path is under `/api/agent/`; Caddy's log drops it
+      for any
+      request whose raw target is or might be an agent route (the word agent, a
+      percent-encoded character, an absolute-form target, a dot or empty segment:
+      Caddy routes on the cleaned path and logs the raw one) and redacts five
+      token-like header names. A token in a URL path, in a header with another name,
+      or logged by a front door in front of this stack is not covered, and the docs
+      say so (C-114 is partial).
     - Operator. `scripts/agent_tokens.py` and `make agent-tokens` list and
       revoke, as
       the database owner, the way `make dispose` works.
@@ -2942,10 +2966,14 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
       overdue. The dashboard's flag looks at the status and the viewer's local date.
     - (g) The per-token limit is 60 a minute (`AGENT_RATE_LIMIT_MAX_REQUESTS`);
       a
-      source may fail 30 times a window (`AGENT_FAILURE_RATE_LIMIT_MAX_REQUESTS`).
-      A 429 is not a read-trail row (a flood of refusals must not become a flood
-      of
-      rows); a source's failures are one aggregated security-log line a window.
+      source may fail 30 times a window (`AGENT_FAILURE_RATE_LIMIT_MAX_REQUESTS`),
+      all sources together 600 (`AGENT_GLOBAL_FAILURE_RATE_LIMIT_MAX_REQUESTS`),
+      and
+      a person's tokens share 120 calls (`AGENT_USER_RATE_LIMIT_MAX_REQUESTS`).
+      A
+      429 is not a read-trail row (a flood of refusals must not become a flood of
+      rows); the failures are one aggregated security-log line a window. The row
+      budgets by kind (10, 5, 5 per token id, 100 overall) are defaults too.
     - (h) A refusal is a read-trail row (`agent_refused`) only for a token that
       exists, naming the person only when the secret matched (an expired or revoked
       token) and `unknown` for a wrong secret; the reason is in the row and

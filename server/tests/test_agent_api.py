@@ -77,6 +77,8 @@ def settings():
         rate_limit_max_requests=100_000,
         agent_rate_limit_max_requests=100_000,
         agent_failure_rate_limit_max_requests=100_000,
+        agent_global_failure_rate_limit_max_requests=100_000,
+        agent_user_rate_limit_max_requests=100_000,
     )
 
 
@@ -89,6 +91,8 @@ async def running(**overrides: object) -> AsyncIterator[AsyncClient]:
         "rate_limit_max_requests": 100_000,
         "agent_rate_limit_max_requests": 100_000,
         "agent_failure_rate_limit_max_requests": 100_000,
+        "agent_global_failure_rate_limit_max_requests": 100_000,
+        "agent_user_rate_limit_max_requests": 100_000,
     }
     app = create_app(make_settings(**{**base, **overrides}))
     async with app.router.lifespan_context(app):
@@ -404,6 +408,8 @@ async def test_a_short_secret_stops_the_server_starting(monkeypatch) -> None:
         "abcdefghi" * 6,  # under ten different characters, and a pattern
         "aabacabadabacabaeabacabadabacabafabacabadabacaba",  # six different, no period
         "passwordpassword",  # short
+        "abcdefghijkl",  # twelve different characters, and still too short
+        "q7v2k9x4m1z8c3b6n5w0",  # twenty different, no pattern, still too short
     ],
 )
 def test_a_weak_secret_stops_the_server_starting(monkeypatch, weak: str) -> None:
@@ -1602,9 +1608,12 @@ async def test_a_flood_of_bad_tokens_writes_nothing_and_never_blocks_a_real_toke
 ):
     """Unauthenticated callers must not be able to grow the append-only trail, or to
     lock a working agent out by flooding from its address (#164 review)."""
-    from app.agent_limits import REFUSAL_ROWS_PER_WINDOW
+    from app.agent_limits import WRONG_SECRET_ROWS_PER_TOKEN
 
-    async with running(agent_failure_rate_limit_max_requests=20) as client:
+    async with running(
+        agent_failure_rate_limit_max_requests=20,
+        agent_global_failure_rate_limit_max_requests=600,
+    ) as client:
         victim = await mint(client, ALICE)
         known = await mint(client, BOB)  # an id the attacker has seen
         before = await _agent_rows()
@@ -1630,24 +1639,26 @@ async def test_a_flood_of_bad_tokens_writes_nothing_and_never_blocks_a_real_toke
                         # The same source, a working token: still served.
                         async with as_agent(client, victim["token"]) as ok:
                             assert (await ok.get("/api/agent/me")).status_code == 200
-            client.app.state.agent_guard.flush()
+            client.app.state.agent_guard.flush(everything=True)
         finally:
             configure_logging("info", "json", stream=io.StringIO())
         # 20 failures were answered 401, then 429 for the rest, and nothing was
         # written for any of them beyond the bound.
         assert codes.count(401) == 20 and codes.count(429) == 4980
         grown = await _agent_rows() - before - 5  # five successful victim calls
-        assert 0 <= grown <= REFUSAL_ROWS_PER_WINDOW
+        assert 0 <= grown <= WRONG_SECRET_ROWS_PER_TOKEN
         # One aggregated security-log line for the source, with the count.
         lines = [
             json.loads(x) for x in buffer.getvalue().splitlines() if x.startswith("{")
         ]
         summaries = [x for x in lines if x.get("event") == "agent.failures"]
         assert len(summaries) == 1
-        assert summaries[0]["count"] == 5000 and summaries[0]["limited"] is True
-        assert not [x for x in lines if x.get("event") == "agent.refused"][
-            REFUSAL_ROWS_PER_WINDOW:
-        ]
+        assert summaries[0]["failures"] == 5000
+        assert summaries[0]["limited_sources"] == 1
+        assert summaries[0]["global_limited"] == 5000 - 600
+        assert len([x for x in lines if x.get("event") == "agent.refused"]) <= (
+            WRONG_SECRET_ROWS_PER_TOKEN
+        )
         # And the real token, from the flooded source, is still served.
         async with as_agent(client, victim["token"]) as ok:
             assert (await ok.get("/api/agent/portfolio")).status_code == 200
@@ -1657,7 +1668,7 @@ async def test_nobody_can_spend_another_tokens_allowance_by_naming_it() -> None:
     """Wrong-secret requests that name a real token's public id spend the source's
     failures and not the token's own allowance, and leave its trail alone beyond the
     bound (#164 review)."""
-    from app.agent_limits import REFUSAL_ROWS_PER_WINDOW
+    from app.agent_limits import WRONG_SECRET_ROWS_PER_TOKEN
 
     async with running(
         agent_rate_limit_max_requests=5, agent_failure_rate_limit_max_requests=10_000
@@ -1681,7 +1692,7 @@ async def test_nobody_can_spend_another_tokens_allowance_by_naming_it() -> None:
             for e in await trail()
             if e["action"] == "agent_refused" and e["token_id"] == victim["id"]
         ]
-        assert len(forged) <= REFUSAL_ROWS_PER_WINDOW
+        assert len(forged) <= WRONG_SECRET_ROWS_PER_TOKEN
         assert all(e["actor"] == "unknown" for e in forged)  # not attributed to Alice
 
 
@@ -1962,3 +1973,258 @@ async def _mint_over_http(port: int) -> dict:
         response = await http.post("/api/agent-tokens", json={})
     assert response.status_code == 201, response.text
     return response.json()
+
+
+# --- the row budgets, the person's allowance, and the summary ---------------------------
+
+
+async def _refused_rows(token_id: str | None = None, **where: str) -> list[dict]:
+    rows = [e for e in await trail() if e["action"] == "agent_refused"]
+    if token_id:
+        rows = [e for e in rows if e["token_id"] == token_id]
+    return [e for e in rows if all(e["detail"].get(k) == v for k, v in where.items())]
+
+
+async def test_wrong_secret_rows_are_bounded_per_token_across_every_source() -> None:
+    """Many sources naming one real token id write at most a handful of rows between
+    them, not a handful each (#164 review: 37 sources x 8 calls wrote 185 rows)."""
+    from app.agent_limits import WRONG_SECRET_ROWS_PER_TOKEN
+
+    async with running(trusted_proxy_cidrs=["127.0.0.0/8"]) as client:
+        victim = await mint(client, ALICE)
+        for source in range(37):
+            async with as_agent(
+                client,
+                f"agt_{victim['id']}." + "E" * 43,
+                **{"X-Real-IP": f"203.0.113.{source}"},
+            ) as attacker:
+                for _ in range(8):
+                    assert (await attacker.get("/api/agent/me")).status_code == 401
+        rows = await _refused_rows(victim["id"])
+        assert len(rows) == WRONG_SECRET_ROWS_PER_TOKEN
+        assert all(e["actor"] == "unknown" for e in rows)
+
+
+async def test_wrong_secret_rows_are_bounded_overall() -> None:
+    from app.agent_limits import ROWS_PER_KIND_OVERALL
+
+    async with running(agent_max_active_tokens=1000) as client:
+        tokens = [await mint(client, ALICE) for _ in range(ROWS_PER_KIND_OVERALL + 40)]
+        async with AsyncClient(
+            transport=ASGITransport(app=client.app), base_url="http://api.test"
+        ) as attacker:
+            for t in tokens:
+                for _ in range(3):
+                    r = await attacker.get(
+                        "/api/agent/me",
+                        headers={"Authorization": f"Bearer agt_{t['id']}.{'F' * 43}"},
+                    )
+                    assert r.status_code == 401
+        assert len(await _refused_rows()) == ROWS_PER_KIND_OVERALL
+
+
+async def test_a_flood_of_wrong_secrets_cannot_starve_the_holders_own_refusals() -> (
+    None
+):
+    """Somebody who holds a revoked or expired token's secret is recorded from a
+    budget of its own, whatever the wrong-secret flood has used up."""
+    from app.agent_limits import ROWS_PER_KIND_OVERALL
+
+    async with running(agent_max_active_tokens=1000) as client:
+        tokens = [await mint(client, ALICE) for _ in range(ROWS_PER_KIND_OVERALL + 10)]
+        mine = await mint(client, BOB)
+        async with as_user(client, BOB) as session:
+            await session.delete(f"/api/agent-tokens/{mine['id']}")
+        async with AsyncClient(
+            transport=ASGITransport(app=client.app), base_url="http://api.test"
+        ) as attacker:
+            for t in tokens:
+                await attacker.get(
+                    "/api/agent/me",
+                    headers={"Authorization": f"Bearer agt_{t['id']}.{'G' * 43}"},
+                )
+        assert len(await _refused_rows(reason="unknown")) == ROWS_PER_KIND_OVERALL
+        async with as_agent(client, mine["token"]) as holder:
+            assert (await holder.get("/api/agent/me")).status_code == 401
+        [row] = await _refused_rows(mine["id"], reason="revoked")
+        assert row["actor"] == BOB
+
+
+async def test_a_valid_tokens_unknown_refs_write_a_bounded_number_of_rows(
+    client,
+) -> None:
+    from app.agent_limits import NOT_VISIBLE_ROWS_PER_TOKEN
+
+    token = (await mint(client))["token"]
+    async with as_agent(client, token) as agent:
+        for i in range(30):
+            r = await agent.get(f"/api/agent/projects/{R(f'nope{i}')}")
+            assert r.status_code == 404
+    assert len(await _refused_rows(reason="not_visible")) == NOT_VISIBLE_ROWS_PER_TOKEN
+
+
+async def test_a_persons_tokens_share_one_allowance() -> None:
+    async with running(agent_user_rate_limit_max_requests=10) as client:
+        mine = [await mint(client, ALICE) for _ in range(5)]
+        other = await mint(client, BOB)
+        codes = []
+        for i in range(14):
+            async with as_agent(client, mine[i % 5]["token"]) as agent:
+                codes.append((await agent.get("/api/agent/me")).status_code)
+        assert codes == [200] * 10 + [429] * 4
+        async with as_agent(client, other["token"]) as agent:
+            assert (await agent.get("/api/agent/me")).status_code == 200
+
+
+async def test_failures_past_the_global_budget_are_refused_without_accounting() -> None:
+    async with running(
+        trusted_proxy_cidrs=["127.0.0.0/8"],
+        agent_failure_rate_limit_max_requests=100,
+        agent_global_failure_rate_limit_max_requests=50,
+    ) as client:
+        good = await mint(client, ALICE)
+        codes = []
+        for i in range(200):  # 200 sources, one failure each
+            async with as_agent(
+                client, _fresh_token(i), **{"X-Real-IP": f"198.51.100.{i}"}
+            ) as agent:
+                codes.append((await agent.get("/api/agent/me")).status_code)
+        assert codes.count(401) == 50 and codes.count(429) == 150
+        assert client.app.state.agent_guard.failures.tracked == 50
+        # A working token is still served, from any of those sources.
+        async with as_agent(
+            client, good["token"], **{"X-Real-IP": "198.51.100.1"}
+        ) as agent:
+            assert (await agent.get("/api/agent/me")).status_code == 200
+
+
+async def test_the_summary_is_written_by_the_app_without_another_failure() -> None:
+    import asyncio
+
+    buffer = io.StringIO()
+    async with running(rate_limit_window_seconds=1) as client:
+        configure_logging("info", "json", stream=buffer)
+        try:
+            for i in range(4):
+                async with as_agent(client, _fresh_token(i)) as agent:
+                    await agent.get("/api/agent/me")
+            await asyncio.sleep(2.3)
+            text = buffer.getvalue()
+        finally:
+            configure_logging("info", "json", stream=io.StringIO())
+    assert text.count('"event": "agent.failures"') == 1 and '"failures": 4' in text
+
+
+async def test_the_summary_is_written_when_the_app_shuts_down() -> None:
+    buffer = io.StringIO()
+    try:
+        async with running() as client:  # a 60 second window: nothing closes by itself
+            configure_logging("info", "json", stream=buffer)
+            for i in range(3):
+                async with as_agent(client, _fresh_token(i)) as agent:
+                    await agent.get("/api/agent/me")
+            assert '"agent.failures"' not in buffer.getvalue()
+        text = buffer.getvalue()
+    finally:
+        configure_logging("info", "json", stream=io.StringIO())
+    assert text.count('"event": "agent.failures"') == 1 and '"failures": 3' in text
+
+
+# --- the address a request is counted against -------------------------------------------
+
+
+def test_the_source_is_always_an_address_or_unknown() -> None:
+    from app.auth import client_address
+    from starlette.requests import Request
+
+    def request(peer, real_ip=None) -> Request:
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "headers": [(b"x-real-ip", real_ip.encode())] if real_ip else [],
+        }
+        if peer is not None:
+            scope["client"] = (peer, 1)
+        return Request(scope)
+
+    settings = make_settings()
+    inside = make_settings(trusted_proxy_cidrs=["10.0.0.0/8"])
+    spoof = '{"event":"x"} \u0000 spoof'
+    assert client_address(request(spoof), settings) == "unknown"
+    assert client_address(request(spoof), inside) == "unknown"
+    assert client_address(request(None), settings) == "unknown"
+    assert client_address(request("10.1.2.3", spoof), inside) == "10.1.2.3"
+    assert client_address(request("::1"), settings) == "::1"
+    assert client_address(request("10.1.2.3", "203.0.113.9"), inside) == "203.0.113.9"
+
+
+async def test_uvicorn_is_started_without_proxy_headers_and_that_matters() -> None:
+    """uvicorn's default lets a loopback peer set request.client from X-Forwarded-For,
+    which would hand the rate limiter an address a client chose. The image and the dev
+    stack start it with --no-proxy-headers; this shows what each setting does."""
+    import asyncio
+    from pathlib import Path
+
+    import uvicorn
+
+    root = Path(__file__).resolve().parents[2]
+    assert "--no-proxy-headers" in (root / "server" / "Dockerfile").read_text("utf-8")
+    assert "--no-proxy-headers" in (root / "compose.dev.yaml").read_text("utf-8")
+    assert "proxy_headers=False" in (root / "server" / "app" / "main.py").read_text(
+        "utf-8"
+    )
+
+    async def seen_by(proxy_headers: bool) -> str:
+        seen: list[str] = []
+
+        async def app(scope, receive, send) -> None:
+            if scope["type"] != "http":
+                return
+            seen.append(scope["client"][0])
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": b"ok"})
+
+        config = uvicorn.Config(
+            app,
+            host="127.0.0.1",
+            port=0,
+            log_level="warning",
+            proxy_headers=proxy_headers,
+            forwarded_allow_ips="127.0.0.1",
+            lifespan="off",
+        )
+        server = uvicorn.Server(config)
+        task = asyncio.create_task(server.serve())
+        for _ in range(200):
+            if server.started:
+                break
+            await asyncio.sleep(0.05)
+        port = server.servers[0].sockets[0].getsockname()[1]
+        try:
+            async with AsyncClient(base_url=f"http://127.0.0.1:{port}") as http:
+                await http.get("/", headers={"X-Forwarded-For": "203.0.113.77"})
+        finally:
+            server.should_exit = True
+            await task
+        return seen[0]
+
+    assert await seen_by(proxy_headers=True) == "203.0.113.77"  # the default: forged
+    assert await seen_by(proxy_headers=False) == "127.0.0.1"  # as the image runs it
+
+
+async def test_a_document_key_that_is_the_primary_framework_is_not_a_supplement(
+    client,
+) -> None:
+    """A supplement is a framework of the build in the supplement role. A key equal to
+    the primary's id (or to any framework that is not a supplement) is just a key."""
+    await put_project(
+        "p",
+        await _stored_doc(
+            chai={"enabled": True, "answers": {"s1-1": {"status": "met"}}},
+            optica={"enabled": True, "answers": {"1-1": {"status": "met"}}},
+        ),
+    )
+    token = (await mint(client))["token"]
+    async with as_agent(client, token) as agent:
+        body = (await agent.get(f"/api/agent/projects/{R('p')}")).json()
+    assert [s["framework"] for s in body["supplements"]] == ["optica"]

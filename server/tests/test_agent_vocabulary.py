@@ -178,3 +178,138 @@ async def test_the_table_and_the_enum_agree() -> None:
             "WHERE conname = 'agent_vocabulary_kind_known'"
         )
     assert set(re.findall(r"'([a-z]+)'", definition)) == {k.value for k in VocabKind}
+
+
+# --- the manifest is trusted build output, read with a shape and safety filter ----------
+
+
+def _chai(edit):
+    return mutated(lambda d: edit(d["frameworks"][0]["vocab"]))
+
+
+@pytest.mark.parametrize(
+    "case, edit",
+    [
+        ("a lone surrogate", lambda v: v["items"].append("a\ud800b")),
+        ("a zero-width space", lambda v: v["items"].append("s1" + chr(0x200B) + "-1")),
+        (
+            "a right-to-left override",
+            lambda v: v["decisions"].append("Stop" + chr(0x202E)),
+        ),
+        ("a byte-order mark", lambda v: v["statuses"].append(chr(0xFEFF) + "met")),
+        ("a private-use character", lambda v: v["gates"].append("A" + chr(0xE000))),
+        (
+            "a line separator",
+            lambda v: v["decisions"].append("Go" + chr(0x2028) + "now"),
+        ),
+        ("a tab", lambda v: v["decisions"].append("Go\tnow")),
+        ("surrounding space", lambda v: v["decisions"].append(" Proceed ")),
+        ("a sentence over the length", lambda v: v["decisions"].append("x" * 65)),
+        (
+            "too many words of one kind",
+            lambda v: v["items"].extend(f"extra-{i}" for i in range(5_001)),
+        ),
+    ],
+)
+def test_a_word_a_display_word_could_not_be_is_refused(case, edit) -> None:
+    with pytest.raises(ManifestError):
+        parse_manifest(_chai(edit))
+    assert case
+
+
+def test_a_word_with_spaces_is_a_display_word() -> None:
+    parse_manifest(_chai(lambda v: v["decisions"].append("Proceed with conditions, 2")))
+    parse_manifest(_chai(lambda v: v["items"].append("x" * 64)))
+
+
+def test_a_manifest_with_too_many_words_overall_is_refused() -> None:
+    def edit(doc) -> None:
+        template = next(f for f in doc["frameworks"] if f["role"] == "supplement")
+        for n in range(4):
+            extra = copy.deepcopy(template)
+            extra["id"] = f"supp{n}"
+            extra["vocab"] = {
+                "items": [f"i{n}-{i}" for i in range(5_000)],
+                "gates": [f"g{n}-{i}" for i in range(5_000)],
+                "statuses": [f"s{n}-{i}" for i in range(5_000)],
+                "decisions": [],
+            }
+            doc["frameworks"].append(extra)
+
+    with pytest.raises(ManifestError, match="more than 50000"):
+        parse_manifest(mutated(edit))
+
+
+def test_a_repeated_json_key_is_refused_and_not_silently_resolved() -> None:
+    text = manifests.DEFAULT_MANIFEST.read_text(encoding="utf-8")
+    doubled = text.replace('"gates": [', '"gates": ["A"], "gates": [', 1)
+    assert doubled != text
+    with pytest.raises(ManifestError, match="repeats the key 'gates'"):
+        parse_manifest(doubled)
+    with pytest.raises(ManifestError, match="repeats the key"):
+        parse_manifest('{"manifest": 1, "manifest": 1}')
+
+
+@requires_db
+@pytest.mark.usefixtures("client")
+async def test_a_manifest_that_cannot_be_loaded_stops_the_job_cleanly(tmp_path) -> None:
+    """A lone surrogate used to pass the parse and crash the INSERT after the
+    retirement sync. It is now refused before the job touches anything."""
+    bad = tmp_path / "manifest.json"
+    bad.write_text(
+        mutated(lambda d: d["frameworks"][0]["vocab"]["items"].append("a\ud800b")),
+        encoding="utf-8",
+        errors="surrogatepass",
+    )
+    done = manifests.run_migrate(DB_URL, RETIREMENT_MANIFEST=str(bad))
+    assert done.returncode == 1
+    assert "Traceback" not in done.stderr and "invisible one" in done.stderr
+    default = parse_manifest(manifests.DEFAULT_MANIFEST.read_text(encoding="utf-8"))
+    assert await table() == expected_rows(default)  # and nothing was changed
+
+
+# --- the API role can read the words and nothing else -----------------------------------
+
+
+@requires_db
+@pytest.mark.usefixtures("client")
+async def test_the_api_role_may_only_read_the_vocabulary() -> None:
+    """Written by hand, not from roles.GRANTS: if a mutation widens GRANTS and the
+    grants together, test_roles agrees with itself and this does not."""
+    import asyncpg
+    from app.roles import provision
+
+    from .test_roles import dsn_as
+
+    role, password = "chai_app_vocab_test", "vocab-test-password-0123456789"
+    async with owner_connection() as owner:
+        if await owner.fetchval("SELECT 1 FROM pg_roles WHERE rolname = $1", role):
+            await owner.execute(f"DROP OWNED BY {role}")
+            await owner.execute(f"DROP ROLE {role}")
+        await provision(owner, role, password)
+        try:
+            granted = {
+                r["privilege_type"]
+                for r in await owner.fetch(
+                    "SELECT privilege_type FROM information_schema.role_table_grants "
+                    "WHERE table_name = 'agent_vocabulary' AND grantee = $1",
+                    role,
+                )
+            }
+            assert granted == {"SELECT"}
+            app = await asyncpg.connect(dsn_as(role, password))
+            try:
+                assert await app.fetchval("SELECT count(*) FROM agent_vocabulary") > 0
+                for statement in (
+                    "INSERT INTO agent_vocabulary VALUES ('chai', 'items', 'x')",
+                    "UPDATE agent_vocabulary SET value = 'x'",
+                    "DELETE FROM agent_vocabulary",
+                    "TRUNCATE agent_vocabulary",
+                ):
+                    with pytest.raises(asyncpg.InsufficientPrivilegeError):
+                        await app.execute(statement)
+            finally:
+                await app.close()
+        finally:
+            await owner.execute(f"DROP OWNED BY {role}")
+            await owner.execute(f"DROP ROLE {role}")

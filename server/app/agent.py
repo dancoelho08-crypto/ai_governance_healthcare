@@ -41,7 +41,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .access import access_of, readable_rows
 from .accessaudit import AccessAction, AccessVia, record_access
-from .agent_limits import AgentGuard
+from .agent_limits import AgentGuard, FailureVerdict, RowKind
 from .agent_tokens import (
     LABEL_MAX_LENGTH,
     AgentCaller,
@@ -489,16 +489,26 @@ async def get_agent(
     if verified.caller is not None:
         if not await guard.allow_token(verified.caller.token_id):
             raise _too_many(guard.window)
+        if not await guard.allow_user(verified.caller.user_id):
+            raise _too_many(guard.window)
         request.state.agent_presented = presented
         return verified.caller
     assert verified.refusal is not None
     source = client_address(request, settings)
-    if not guard.charge_failure(source):
+    if guard.charge_failure(source) is not FailureVerdict.ALLOW:
         raise _too_many(guard.window)
+    # A wrong secret can be sent by anybody who has seen a public id; a right secret
+    # on a token that stopped working is its holder. Separate budgets, so a flood of
+    # the first cannot starve the second.
+    kind = (
+        RowKind.RIGHT_SECRET
+        if verified.refusal in (Refusal.REVOKED, Refusal.EXPIRED)
+        else RowKind.WRONG_SECRET
+    )
     if (
         verified.known_id
         and presented.token_id
-        and await guard.may_write_row(presented.token_id, source)
+        and guard.may_write_row(kind, presented.token_id)
     ):
         await _record_refusal(
             db, request, presented, verified.refusal, verified.user_id
@@ -784,14 +794,16 @@ async def agent_project(
     if found is None:
         # Nothing was disclosed. A call by a token that verified, so it is
         # attributable and limited by that token's own allowance.
-        await _record_refusal(
-            db,
-            request,
-            request.state.agent_presented,
-            Refusal.NOT_VISIBLE,
-            caller.user_id,
-            {"ref": ref},
-        )
+        guard: AgentGuard = request.app.state.agent_guard
+        if guard.may_write_row(RowKind.NOT_VISIBLE, caller.token_id):
+            await _record_refusal(
+                db,
+                request,
+                request.state.agent_presented,
+                Refusal.NOT_VISIBLE,
+                caller.user_id,
+                {"ref": ref},
+            )
         raise HTTPException(404, "No such project")
     return found
 

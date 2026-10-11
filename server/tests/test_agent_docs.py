@@ -153,6 +153,8 @@ def settings():
         rate_limit_max_requests=100_000,
         agent_rate_limit_max_requests=100_000,
         agent_failure_rate_limit_max_requests=100_000,
+        agent_global_failure_rate_limit_max_requests=100_000,
+        agent_user_rate_limit_max_requests=100_000,
     )
 
 
@@ -532,9 +534,25 @@ def test_the_limits_on_the_page_are_the_codes() -> None:
     failures = defaults.agent_failure_rate_limit_max_requests
     assert f"up to {failures} per window" in text
     assert f"| `AGENT_FAILURE_RATE_LIMIT_MAX_REQUESTS` | `{failures}` |" in text
-    from app.agent_limits import REFUSAL_ROWS_PER_WINDOW
+    from app.agent_limits import (
+        NOT_VISIBLE_ROWS_PER_TOKEN,
+        RIGHT_SECRET_ROWS_PER_TOKEN,
+        ROWS_PER_KIND_OVERALL,
+        WRONG_SECRET_ROWS_PER_TOKEN,
+    )
 
-    assert f"at most {REFUSAL_ROWS_PER_WINDOW} per token id" in text
+    assert f"at most {WRONG_SECRET_ROWS_PER_TOKEN} per token id a window" in text
+    assert f"at most {RIGHT_SECRET_ROWS_PER_TOKEN} per token id a window" in text
+    assert f"at most {NOT_VISIBLE_ROWS_PER_TOKEN} per token a window" in text
+    assert f"{ROWS_PER_KIND_OVERALL} overall" in text
+    assert (
+        f"| `AGENT_GLOBAL_FAILURE_RATE_LIMIT_MAX_REQUESTS` | `{defaults.agent_global_failure_rate_limit_max_requests}` |"
+        in text
+    )
+    assert (
+        f"| `AGENT_USER_RATE_LIMIT_MAX_REQUESTS` | `{defaults.agent_user_rate_limit_max_requests}` |"
+        in text
+    )
     assert defaults.agent_id_secret == "" and not defaults.agent_api_enabled
 
 
@@ -542,9 +560,11 @@ def test_every_documented_setting_is_read_listed_and_passed_on() -> None:
     names = sorted(set(re.findall(r"`(AGENT_[A-Z_]+)`", TEXT)))
     assert names == [
         "AGENT_FAILURE_RATE_LIMIT_MAX_REQUESTS",
+        "AGENT_GLOBAL_FAILURE_RATE_LIMIT_MAX_REQUESTS",
         "AGENT_ID_SECRET",
         "AGENT_MAX_ACTIVE_TOKENS",
         "AGENT_RATE_LIMIT_MAX_REQUESTS",
+        "AGENT_USER_RATE_LIMIT_MAX_REQUESTS",
     ]
     config = (ROOT / "server" / "app" / "config.py").read_text(encoding="utf-8")
     example = (ROOT / ".env.example").read_text(encoding="utf-8")

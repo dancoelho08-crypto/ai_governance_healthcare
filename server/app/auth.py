@@ -170,21 +170,26 @@ def client_address(request: Request, settings: Settings) -> str:
     that is, when the peer is the proxy that wrote it. Otherwise (no range set) every
     caller behind the proxy shares the proxy's address, which limits them together
     but cannot be rotated by a client.
+
+    The result is always a parsed IP address, or the literal ``unknown``: it becomes
+    a bucket key and a log field, so it is never text a client chose. (uvicorn's own
+    ``--proxy-headers`` would let a loopback peer set the peer address from
+    ``X-Forwarded-For``; the image starts it with ``--no-proxy-headers``.)
     """
     peer = request.client.host if request.client else ""
-    if not peer or not settings.trusted_proxy_cidrs:
-        return peer
     try:
         ip = ipaddress.ip_address(peer)
     except ValueError:
-        return peer
+        return "unknown"
+    if not settings.trusted_proxy_cidrs:
+        return str(ip)
     if not any(ip in net for net in _networks(settings.trusted_proxy_cidrs)):
-        return peer
+        return str(ip)
     reported = (request.headers.get("x-real-ip") or "").strip()
     try:
         return str(ipaddress.ip_address(reported))
     except ValueError:
-        return peer
+        return str(ip)
 
 
 def _check_peer(request: Request, settings: Settings) -> None:

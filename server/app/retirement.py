@@ -42,6 +42,7 @@ import hashlib
 import json
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -178,11 +179,31 @@ def _keys(
 
 
 VOCAB_KINDS = ("items", "gates", "statuses", "decisions")
-MAX_VOCAB_WORD = 200
+# A word is a display word of a framework definition: an id, a status, an option such
+# as "Proceed with conditions". 64 characters is longer than any of them.
+MAX_VOCAB_WORD = 64
+MAX_WORDS_PER_KIND = 5_000
+MAX_WORDS_TOTAL = 50_000
+
+
+def _unsafe_character(word: str) -> str | None:
+    """The first character of ``word`` that no display word has: a control, format
+    (zero-width, bidirectional), surrogate, private-use or unassigned character, or a
+    line or paragraph separator. Spaces are fine ("Proceed with conditions")."""
+    for ch in word:
+        category = unicodedata.category(ch)
+        if category[0] == "C" or category in {"Zl", "Zp"}:  # enum-ok: Unicode
+            return f"U+{ord(ch):04X}"
+    return None
 
 
 def _vocab(raw: Any, where: str) -> tuple[tuple[str, frozenset[str]], ...]:
-    """A framework's vocabulary, strictly: four lists of plain words, no more."""
+    """A framework's vocabulary, strictly: four lists of plain display words.
+
+    This is a shape and safety filter, not a judgment of content: the manifest is build
+    output and carries the authority of the framework definitions it is built from, so
+    a poisoned one could put text in front of agents (D-89).
+    """
     if raw is None:
         return ()
     _keys(raw, set(VOCAB_KINDS), where)
@@ -190,17 +211,36 @@ def _vocab(raw: Any, where: str) -> tuple[tuple[str, frozenset[str]], ...]:
     for kind in VOCAB_KINDS:
         words = raw[kind]
         _need(isinstance(words, list), f"{where}.{kind} is not a list")
+        _need(
+            len(words) <= MAX_WORDS_PER_KIND,
+            f"{where}.{kind} lists {len(words)} words, more than {MAX_WORDS_PER_KIND}",
+        )
         for word in words:
             _need(
                 isinstance(word, str)
                 and bool(word.strip())
-                and len(word) <= MAX_VOCAB_WORD
-                and not _CONTROL.search(word),
-                f"{where}.{kind} holds {word!r}, which is not a word",
+                and word == word.strip()
+                and len(word) <= MAX_VOCAB_WORD,
+                f"{where}.{kind} holds {str(word)[:40]!r}, which is not a word "
+                f"(text of 1 to {MAX_VOCAB_WORD} characters, no surrounding space)",
+            )
+            bad = _unsafe_character(word)
+            _need(
+                bad is None,
+                f"{where}.{kind} holds {word[:40]!r}, which has the character {bad}, "
+                "a control, zero-width, bidirectional or otherwise invisible one",
             )
         _need(len(set(words)) == len(words), f"{where}.{kind} lists a word twice")
         out.append((kind, frozenset(words)))
     return tuple(out)
+
+
+def _no_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    keys = [k for k, _ in pairs]
+    dup = sorted({k for k in keys if keys.count(k) > 1})
+    if dup:
+        raise ManifestError(f"the manifest repeats the key {dup[0]!r}")
+    return dict(pairs)
 
 
 def _id(value: Any, where: str) -> str:
@@ -215,7 +255,7 @@ def parse_manifest(text: str) -> Manifest:
     supplement, a primary that ends nothing or a hash that does not match its pairs
     is an error, because acting on a manifest misread is changing disposal."""
     try:
-        raw = json.loads(text)
+        raw = json.loads(text, object_pairs_hook=_no_duplicate_keys)
     except json.JSONDecodeError as exc:
         raise ManifestError(f"the manifest is not JSON: {exc}") from exc
     _keys(raw, {"manifest", "primary", "frameworks", "ruleSetHash"}, "the manifest")
@@ -273,6 +313,11 @@ def parse_manifest(text: str) -> Manifest:
                 _vocab(f.get("vocab"), f"{where}.vocab"),
             )
         )
+    total = sum(len(words) for e in entries for _, words in e.vocab)
+    _need(
+        total <= MAX_WORDS_TOTAL,
+        f"the manifest lists {total} words, more than {MAX_WORDS_TOTAL}",
+    )
     ids = [e.id for e in entries]
     _need(len(set(ids)) == len(ids), "a framework is listed twice")
     primaries = [e.id for e in entries if e.role is FrameworkRole.PRIMARY]

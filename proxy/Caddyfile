@@ -53,14 +53,28 @@
 {$SITE_ADDRESS:http://:80} {
 	log {
 		output stdout
-		# Keep a query string out of the log on the agent routes (#164). The token is read
-		# from the Authorization header only (Caddy already redacts that header's value
-		# in its log), but a client that puts one in a URL anyway would have it written
-		# here. Only /api/agent/ URIs are touched; every other line is as it was.
+		# Keep a token out of the log (#164). The token is read from the Authorization
+		# header only, and Caddy already redacts that header's value (and Cookie's) in
+		# its log. A client that puts a token in a URL query anyway would have it written
+		# here, so the query string is dropped from the logged URI whenever the URI is, or
+		# might be, an agent route. Caddy routes on the decoded, cleaned path while the
+		# log holds the raw request target, so "might be" is any of: the word "agent" in
+		# it (any case), a percent-encoded character before the "?" (/api/%61gent/...),
+		# an absolute-form target (http://host/..., which has a "//"), or an empty or dot
+		# path segment
+		# (//api/agent, /api/./agent). Over-redacting is fine; an ordinary route's query
+		# is still logged. The first group is the part before the "?", whichever branch
+		# matched. What this cannot cover: a token in a URL PATH, which is the client's
+		# mistake, and a request header with another name than the list below.
 		format filter {
 			wrap console
 			fields {
-				request>uri regexp "(?i)^(/api/agent/[^?]*)\?.*$" "$1?[redacted]"
+				request>uri regexp "(?i)^(?:([^?]*(?:agent|%|//|/\.{1,2}(?:/|$))[^?]*)\?.*|([^?]*)\?.*agent.*)$" "$1$2?[redacted]"
+				request>headers>X-Api-Key replace REDACTED
+				request>headers>Api-Key replace REDACTED
+				request>headers>X-Auth-Token replace REDACTED
+				request>headers>X-Authorization replace REDACTED
+				request>headers>X-Access-Token replace REDACTED
 			}
 		}
 	}

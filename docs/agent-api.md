@@ -47,16 +47,26 @@ compliant, and an agent that reports it as one is wrong.
   without them. Every call it makes is in the read trail, marked as agent access,
   with the token's id, and a call a rate limit turns away is counted in the
   security log instead ([what a call leaves behind](#what-a-call-leaves-behind)).
-- **A wrong token learns nothing.** Missing, malformed, unknown, expired, revoked
-  and removed are the same answer: the same status, the same body, the same
-  header. Which it was is in the read trail, for the operator, and nowhere else.
+- **A wrong token learns almost nothing.** Missing, malformed, unknown, expired,
+  revoked and removed are the same answer: the same status, the same body, the
+  same header. The one exception is a source that has already failed too often in
+  the window: it is answered `429` instead, whatever it sent. Which it was is in
+  the read trail, for the operator, and nowhere else. A token's public id is not a
+  secret, and whether an id exists can be told apart by how long the answer takes
+  (an existing id with a wrong secret is a little slower, because it may write a
+  row). That is not claimed to be hidden: the secret is what protects a token.
 - **A flood of wrong tokens costs nothing that lasts.** The token is checked
-  before anything is limited. A bad token writes no row unless it names a token
-  that exists, and then only a handful per source per minute; the rest are
-  counted in one security-log line, and a source that has failed too often is
-  answered `429` without any write. A working token is never refused because of
-  the address it came from, and nobody can use up another token's allowance by
-  naming it.
+  before anything is limited, with one read and no write. A bad token is never a
+  row unless it names a token that exists, and then rows are bounded per token id
+  across every source (10 wrong secrets a minute, 5 for a right secret on a token
+  that stopped working, 5 for a project that is not visible) and overall (100 of
+  each kind a minute); what is not written is counted in one security-log line a
+  window. A source that has failed too often is answered `429` with no write, and
+  so is everyone once the failures of all sources together pass a global budget,
+  without any per-source accounting, so rotating sources cannot make the server
+  work or log more. A working token is never counted against a source or a budget
+  and is never refused for them, and nobody can use up another token's allowance
+  by naming it.
 - **The server cannot leak what it never copies.** Each response is built field by
   field from an allowlist of stored keys. A new field in the stored record
   reaches no agent until someone adds it, in a reviewed change. A key a writer
@@ -82,13 +92,27 @@ compliant, and an agent that reports it as one is wrong.
 only. The response holds the token once.
 
 **Shape.** `agt_`, 16 hex characters (the token's public id), a `.`, and 43
-characters of URL-safe base64 (256 random bits). Only the public id is ever
-logged, and only a SHA-256 hash of the whole token is stored, so the server
-cannot show a token again. The token is read from the `Authorization` header and
-nowhere else; one sent in a URL, a cookie or another header is refused. Do not
-send it in a URL anyway: this server and the proxy in this repository keep the
-query string of an agent route out of their logs, but your front door, load
-balancer or a client's own log may not.
+characters of URL-safe base64 (256 random bits). The public id is not a secret: it
+is in the read trail and the logs, and it shows up in the answer time of a wrong
+secret. Only the public id is ever logged by this server, and only a SHA-256 hash
+of the whole token is stored, so the server cannot show a token again.
+
+**Where a token may be sent.** In the `Authorization` header and nowhere else: one in
+a query parameter, a cookie or another header is refused. Never send it in a URL, or
+in a header with any other name. This stack tries to keep it out of its logs if it is
+sent anyway, and cannot do so completely:
+
+- The API's access log drops the query string of a request whose decoded path is
+  under `/api/agent/`. The proxy's log drops the query string of any request whose
+  target is, or might be, an agent route (it contains `agent` in any case, a
+  percent-encoded character before the `?`, an absolute-form target, or an empty
+  or dot path segment), and the values of `X-Api-Key`, `Api-Key`, `X-Auth-Token`,
+  `X-Authorization` and `X-Access-Token` (a fixed list of header names; Caddy
+  itself redacts `Authorization` and `Cookie`).
+- **A token in a URL path** (`/api/agent/<token>`) is logged by both: it is the
+  client's mistake, and nothing here can redact it. A header with another name is
+  logged by the proxy. Your front door, load balancer or the client's own logs may
+  record any of these.
 
 **Lifetime.** Exactly 8 hours from the moment it is minted, and the database
 refuses any other lifetime. It cannot be extended: mint another.
@@ -266,10 +290,20 @@ An item id, a checkpoint id, a supplement's id, a status and a decision are retu
 only if they are words of the framework definitions the server's build carries: the
 build writes them into `manifest.json`, the migrate job loads them into the database,
 and the API checks each against the framework the record follows (a supplement's
-answers against the supplement's own). Anything else a record holds under those
-keys is returned as `null` or left out, free text included: no pattern can tell a name
-from an id, a list of the ids can. With no manifest loaded, an agent is shown no item,
-checkpoint or status at all. People are `u_` and 32 hex characters.
+answers against the supplement's own; a document key equal to the primary's id is not
+a supplement). Anything else a record holds under those keys is returned as `null` or
+left out, free text included: no pattern can tell a name from an id, a list of the ids
+can. With no manifest loaded, an agent is shown no item, checkpoint or status at all.
+People are `u_` and 32 hex characters.
+
+The manifest is **trusted build output**: it carries the same authority as the
+framework definitions it is built from, and a poisoned one could put text in front of
+agents. The migrate job reads it with a shape and safety filter, not a judgment of
+content: each word is 1 to 64 characters with no control, zero-width, bidirectional,
+surrogate or private-use character and no surrounding space (spaces inside are fine,
+as in `Proceed with conditions`); no kind lists more than 5,000 words and the manifest
+no more than 50,000; and a repeated JSON key is an error. A manifest that fails is
+refused before the job changes anything.
 
 ### `GET /api/agent/me`
 
@@ -505,21 +539,32 @@ The token is checked first, and only then is anything limited.
   (`AGENT_RATE_LIMIT_MAX_REQUESTS`), lower than the limit a person at the dashboard
   has (240). Only a call whose token verified spends it, so one agent cannot spend
   another's, and nobody can spend a token's allowance by naming its public id.
+- **A person's tokens** share 120 calls per window
+  (`AGENT_USER_RATE_LIMIT_MAX_REQUESTS`), so five tokens do not multiply what a
+  person's calls cost the server.
 - **A failed call** (a token that is missing, wrong, expired or revoked) is counted
   against its source, up to 30 per window (`AGENT_FAILURE_RATE_LIMIT_MAX_REQUESTS`).
-  After that the rest are answered `429` with nothing written. A token that works is
-  never counted against its source and never refused for it: a flood from an address
-  does not lock out an agent behind the same address.
+  After that the rest are answered `429` with nothing written, which is also what
+  a bad token from such a source is told instead of `401`. All sources together
+  may fail 600 times per window (`AGENT_GLOBAL_FAILURE_RATE_LIMIT_MAX_REQUESTS`);
+  past that every failure is answered `429` with no per-source accounting at all.
+  A token that works is never counted against its source or the global budget and
+  never refused for them: a flood from an address does not lock out an agent behind
+  the same address.
 - **The source** is the socket peer. The address the proxy reports in `X-Real-IP` is
   believed only when `TRUSTED_PROXY_CIDR` is set and the peer is inside it, that is,
   when the peer is the proxy; the compose stack sets it. With no range set, every
   caller behind the proxy is one source, which limits them together and cannot be
-  rotated by a client.
+  rotated by a client. It is always an IP address or `unknown`, never text a client
+  sent, and the image starts uvicorn with `--no-proxy-headers`, whose default would
+  let a loopback peer set it from `X-Forwarded-For`.
 
 A `429` carries `Retry-After` (seconds) and no other rate-limit header. A working
-token that is over its own allowance is logged once per window as `ratelimit.tripped`
-(`key` `agent:` and its public id); failures are summarized, below. The limiters live
-in each replica, so behind several the ceilings are that many times the settings.
+token that is over its own or its person's allowance is logged once per window as
+`ratelimit.tripped` (`key` `agent:` and the token's public id, or `agent-user:` and
+the person's id). The tallies hold at most 10,000 sources and 10,000 token ids, drop
+the oldest idle ones first, and cost the same for every failure. The limiters live in
+each replica, so behind several the ceilings are that many times the settings.
 
 ## What a call leaves behind
 
@@ -529,10 +574,19 @@ caller must not be able to grow it:
 | The call | The trail | The security log |
 |---|---|---|
 | Answered (`200`) | One row, in the same transaction as the answer, so an answer that cannot be recorded is not given. | `record.read`, with `via` set to `agent` |
-| A project the owner's dashboard does not show (`404`) | One row (`agent_refused`, reason `not_visible`) | `agent.refused` |
-| A token that exists but is expired, revoked, or presented with the wrong secret (`401`) | One row (`agent_refused`), at most 5 per token id and source per window | `agent.refused`, for each row |
-| A token that is malformed, or names no token (`401`) | **No row** | Counted: one `agent.failures` line per source per window, with the count |
-| Over the failure limit or a token's own limit (`429`) | **No row** | Counted in the same `agent.failures` line, or `ratelimit.tripped` once per window |
+| A project the owner's dashboard does not show (`404`) | One row (`agent_refused`, reason `not_visible`), at most 5 per token a window and 100 overall | `agent.refused`, for each row |
+| A token that exists, expired or revoked, presented with its right secret (`401`) | One row (`agent_refused`), at most 5 per token id a window and 100 overall | `agent.refused`, for each row |
+| A token that exists, presented with a wrong secret (`401`) | One row (`agent_refused`), at most 10 per token id a window across all sources and 100 overall | `agent.refused`, for each row |
+| A token that is malformed, or names no token (`401`) | **No row** | Counted in the summary line |
+| Over a failure limit, the global budget, or a token's or person's allowance (`429`) | **No row** | Counted in the summary line, or `ratelimit.tripped` once per window |
+
+The three kinds of refusal have budgets of their own, so a flood of wrong secrets (which
+anybody who has seen a public id can send) cannot starve the record of a stopped
+token's real holder. What is not written is counted in the summary: one
+`agent.failures` line per window, written by a background task every half window (and
+at shutdown), with the failures, the sources that went over their limit, how many were
+answered by the global budget, the sources dropped to stay within the cap, the top
+sources with their counts, and how many rows were not written, by kind.
 
 The row is marked as agent access and carries the token's public id, never its secret:
 
@@ -570,8 +624,7 @@ header, which the agent routes ignore: a proxy that works strips it, so seeing o
 means the request did not come through the agent route of the proxy.
 
 The security events are `agent_token.minted`, `agent_token.revoked`, `agent.refused`,
-`agent.failures` (the count of failed calls from one source in one window, written
-when the window closes, at the next failed call, or at shutdown) and, for a successful
+`agent.failures` (the summary of a window, above) and, for a successful
 call, `record.read` with `via` set to `agent`
 ([the list](deploy.md#security-events-collecting-retaining-and-alerting)).
 
@@ -581,8 +634,11 @@ call, `record.read` with `via` set to `agent`
 
 1. Set `AGENT_ID_SECRET` to a long random value: `openssl rand -hex 32`. The
    server refuses to start on one shorter than 32 characters, with fewer than
-   10 different ones, or made of one short pattern repeated. It keys the opaque ids and is not stored in the database; keep it like a
-   password. Changing it changes every id an agent is shown, and loses nothing.
+   10 different ones, or made of one short pattern repeated. That is a filter
+   for the obvious mistakes and **not a strength test**: a dictionary phrase of
+   32 letters passes, so generate the value, do not compose it. It keys the
+   opaque ids and is not stored in the database; keep it like a password. Changing
+   it changes every id an agent is shown, and loses nothing.
 2. Apply the migration. `013_agent_tokens.sql` runs with the others
    (`python -m app.migrate`, compose's `migrate` service, or `RUN_MIGRATIONS=true`).
    It creates `agent_token` and marks the read trail, and `014_agent_vocabulary.sql`
@@ -598,6 +654,8 @@ call, `record.read` with `via` set to `agent`
 | `AGENT_ID_SECRET` | empty (the API is off) | At least 32 characters, at least 10 different, not a repeated pattern. Keys the opaque ids of people and projects. |
 | `AGENT_RATE_LIMIT_MAX_REQUESTS` | `60` | Calls per token per `RATE_LIMIT_WINDOW_SECONDS`. |
 | `AGENT_FAILURE_RATE_LIMIT_MAX_REQUESTS` | `30` | Failed calls one source may make per window before the rest are answered `429`. |
+| `AGENT_GLOBAL_FAILURE_RATE_LIMIT_MAX_REQUESTS` | `600` | Failed calls all sources together may make per window before every failure is answered `429` with no per-source accounting. |
+| `AGENT_USER_RATE_LIMIT_MAX_REQUESTS` | `120` | Calls per window all of one person's tokens share. |
 | `AGENT_MAX_ACTIVE_TOKENS` | `5` | Live tokens one person may hold. |
 
 ### Let the path through your front door
@@ -656,13 +714,14 @@ that holds only expired ones).
 
 ### What to monitor
 
-- `agent.failures` lines with a large `count`, or `limited` true: a guesser, or an
-  agent with a dead token in a loop. The line names the `source`. A burst of
-  `agent.refused` events (each one a read-trail row) for one token id is somebody
-  who knows that id; the row says `unknown` for a wrong secret and names the person
-  for a token that matched and had stopped working.
-- `ratelimit.tripped` with a `key` that begins `agent:`: a working token over its own
-  allowance, an agent in a loop.
+- `agent.failures` lines with a large `failures`, `limited_sources` or
+  `global_limited`: a guesser, or an agent with a dead token in a loop. The line
+  lists the top `source`s with their counts. A burst of `agent.refused` events (each
+  one a read-trail row) for one token id is somebody who knows that id; the row says
+  `unknown` for a wrong secret and names the person for a token that matched and had
+  stopped working. `rows_not_written` says how many rows the budgets turned away.
+- `ratelimit.tripped` with a `key` that begins `agent:` or `agent-user:`: a working
+  token or a person over an allowance, an agent in a loop.
 - `agent_token.minted` from a person who does not use agents.
 - A person's tokens when they leave: the app does not see your directory.
 

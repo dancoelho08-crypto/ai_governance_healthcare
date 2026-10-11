@@ -405,6 +405,13 @@ class Settings:
     # Failed agent calls one source may make per window before the rest are answered
     # 429 with nothing written. Successful calls are never counted against a source.
     agent_failure_rate_limit_max_requests: int = 30
+    # Failed agent calls all sources together may make per window; past it a failure
+    # is answered 429 with no per-source accounting, so that rotating source keys
+    # cannot make the server do unbounded work.
+    agent_global_failure_rate_limit_max_requests: int = 600
+    # Calls per window all of one person's tokens share, so five tokens do not
+    # multiply the work a person's calls cost.
+    agent_user_rate_limit_max_requests: int = 120
     # Tokens a person may hold at once (not revoked, not expired).
     agent_max_active_tokens: int = 5
 
@@ -613,6 +620,12 @@ class Settings:
             agent_rate_limit_max_requests=_int("AGENT_RATE_LIMIT_MAX_REQUESTS", 60),
             agent_failure_rate_limit_max_requests=_int(
                 "AGENT_FAILURE_RATE_LIMIT_MAX_REQUESTS", 30
+            ),
+            agent_global_failure_rate_limit_max_requests=_int(
+                "AGENT_GLOBAL_FAILURE_RATE_LIMIT_MAX_REQUESTS", 600
+            ),
+            agent_user_rate_limit_max_requests=_int(
+                "AGENT_USER_RATE_LIMIT_MAX_REQUESTS", 120
             ),
             agent_max_active_tokens=_int("AGENT_MAX_ACTIVE_TOKENS", 5),
             version=_str("APP_VERSION", "0.1.0"),

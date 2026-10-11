@@ -44,11 +44,51 @@ AFTER_HANDOFF = (
     "\t\t\t\ttransport http {\n\t\t\t\t\tdial_timeout 5s\n\t\t\t\t}\n"
     "\t\t\t}\n\t\t}\n\t}\n\n\thandle /api/agent/* {"
 )
+FULL_REGEXP = (
+    r'"(?i)^(?:([^?]*(?:agent|%|//|/\.{1,2}(?:/|$))[^?]*)\?.*'
+    r"|([^?]*)\?.*agent.*)$"
+    r'" "$1$2?[redacted]"'
+)
 MUTATIONS: list[tuple[str, str, str]] = [
     (
         "the log keeps a query string on the agent routes",
-        "(?i)^(/api/agent/[^?]*)",
-        "(?i)^(/api/nothing/[^?]*)",
+        "(?:agent|%|",
+        "(?:nothing|%|",
+    ),
+    (
+        "the log keeps the query of a percent-encoded path",
+        "(?:agent|%|//|",
+        "(?:agent|//|",
+    ),
+    (
+        "the log keeps the query of a doubled slash",
+        r"(?:agent|%|//|/\.{1,2}",
+        r"(?:agent|%|/\.{1,2}",
+    ),
+    (
+        "the log keeps the query of a dot segment",
+        r"|/\.{1,2}(?:/|$))",
+        ")",
+    ),
+    (
+        "the log keeps a query that only mentions agent",
+        r"|([^?]*)\?.*agent.*",
+        "",
+    ),
+    (
+        "the log is back to redacting only a plain agent path",
+        FULL_REGEXP,
+        r'"(?i)^(/api/agent/[^?]*)\?.*$" "$1?[redacted]"',
+    ),
+    (
+        "the log keeps an X-Api-Key header",
+        "request>headers>X-Api-Key replace REDACTED",
+        "request>headers>X-Nothing replace REDACTED",
+    ),
+    (
+        "the log keeps an X-Auth-Token header",
+        "request>headers>X-Auth-Token replace REDACTED",
+        "request>headers>X-Nothing replace REDACTED",
     ),
     (
         "a write verb is forwarded",

@@ -1457,8 +1457,10 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
 
 - **Claim:** A token that is missing, malformed, unknown, wrong, expired, revoked
   or whose owner is gone gets the same status, the same body and the same header
-  on every agent route. Which it was is in the read trail, for the operator, and
-  nowhere in the response. (Response timing is not claimed to be equal.)
+  on every agent route, except that a source that has already used up its failures
+  for the window is answered 429 instead, whatever it sent. Which it was is in the
+  read trail, for the operator, and nowhere in the response. Response timing is
+  not claimed to be equal: whether a public token id exists can be told by timing.
 - **Asserted in:** `docs/agent-api.md` — "and removed are the same answer: the same status, the same body, the same header."
 - **Status:** enforced
 - **Enforced by:**
@@ -1654,19 +1656,36 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
   `tests/test_stack.py::a write verb on the agent route is refused by the proxy`
   `server/tests/test_agent_mutations.py::test_each_guard_is_noticed_when_broken`
 
-### C-112 A flood of wrong tokens cannot grow the trail or lock out a working one
+### C-112 A flood of wrong tokens cannot grow the trail, burn the server or lock out a working one
 
 - **Claim:** The token is checked before anything is limited. A bad token writes no
-  read-trail row unless it names a token that exists, and then at most five per
-  token id and source per window; a source that fails too often is answered 429 with
-  nothing written; a working token is never counted against its source and so never
-  refused because of the address it came from.
-- **Asserted in:** `docs/agent-api.md` — "A token that works is never counted against its source and never refused for it"
+  read-trail row unless it names a token that exists, and then rows are bounded per
+  token id across all sources and overall, by kind (wrong secret, right secret on a
+  stopped token, project not visible), so a flood of one kind cannot starve another.
+  A source that fails too often, and every source once all failures pass a global
+  budget, is answered 429 with nothing written. The failure tally is bounded and
+  O(1) per failure, and the flood leaves one summary line a window. A working token
+  is never counted against a source or a budget and never refused for them, and a
+  person's tokens share one allowance.
+- **Asserted in:** `docs/agent-api.md` — "A working token is never counted against a source or a budget"
 - **Status:** enforced
 - **Enforced by:**
   `server/tests/test_agent_api.py::test_a_flood_of_bad_tokens_writes_nothing_and_never_blocks_a_real_token`
   `server/tests/test_agent_api.py::test_nobody_can_spend_another_tokens_allowance_by_naming_it`
   `server/tests/test_agent_api.py::test_the_per_token_limit_counts_only_requests_that_verified`
+  `server/tests/test_agent_api.py::test_wrong_secret_rows_are_bounded_per_token_across_every_source`
+  `server/tests/test_agent_api.py::test_wrong_secret_rows_are_bounded_overall`
+  `server/tests/test_agent_api.py::test_a_flood_of_wrong_secrets_cannot_starve_the_holders_own_refusals`
+  `server/tests/test_agent_api.py::test_a_valid_tokens_unknown_refs_write_a_bounded_number_of_rows`
+  `server/tests/test_agent_api.py::test_a_persons_tokens_share_one_allowance`
+  `server/tests/test_agent_api.py::test_failures_past_the_global_budget_are_refused_without_accounting`
+  `server/tests/test_agent_api.py::test_the_summary_is_written_by_the_app_without_another_failure`
+  `server/tests/test_agent_api.py::test_the_summary_is_written_when_the_app_shuts_down`
+  `server/tests/test_agent_limits.py::test_a_hundred_thousand_sources_cost_a_bounded_time_and_memory`
+  `server/tests/test_agent_limits.py::test_an_active_attackers_bucket_survives_the_evictions_it_causes`
+  `server/tests/test_agent_limits.py::test_a_flood_of_sources_is_one_log_line_not_one_per_source`
+  `server/tests/test_agent_limits.py::test_past_the_global_budget_nothing_is_accounted_per_source`
+  `server/tests/test_agent_limits.py::test_the_limiter_sweeps_the_keys_a_window_leaves_behind`
   `server/tests/test_agent_mutations.py::test_each_guard_is_noticed_when_broken`
 
 ### C-113 A key a writer chose reaches an agent only if the build's definitions have it
@@ -1687,45 +1706,76 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
   `server/tests/test_agent_vocabulary.py::test_the_server_reads_the_words_strictly`
   `server/tests/test_agent_mutations.py::test_each_guard_is_noticed_when_broken`
 
-### C-114 The token is read from one header, and not logged
+### C-114 The token is read from one header, and this stack tries not to log it
 
 - **Claim:** The token is read from the Authorization header and nowhere else: a
-  token in a query parameter, a cookie or another header is refused. This
-  server's access log and the proxy's keep the query string of an agent route out,
-  so a token sent in a URL anyway is not written there.
-- **Asserted in:** `docs/agent-api.md` — "The token is read from the `Authorization` header and nowhere else"
-- **Asserted in:** `docs/agent-api.md` — "this server and the proxy in this repository keep the query string of an agent route out of their logs"
+  token in a query parameter, a cookie or another header is refused. The API's
+  access log drops the query string of a request whose decoded path is under
+  `/api/agent/`; the proxy's log drops the query string of any request whose target
+  is, or might be, an agent route (the word agent in any case, a percent-encoded
+  character before the query, an absolute-form target, an empty or dot path
+  segment) and the values of five token-like request headers.
+- **Asserted in:** `docs/agent-api.md` — "In the `Authorization` header and nowhere else: one in a query parameter, a cookie or another header is refused."
+- **Asserted in:** `docs/agent-api.md` — "The API's access log drops the query string of a request whose decoded path is under `/api/agent/`."
 - **Status:** partial
 - **Enforced by:**
   `server/tests/test_agent_api.py::test_the_token_comes_from_the_authorization_header_and_nowhere_else`
   `server/tests/test_agent_api.py::test_a_token_sent_in_a_url_is_refused_and_not_logged_by_the_server`
   `server/tests/test_agent_api.py::test_the_access_log_does_not_keep_a_query_on_an_agent_route`
-  `tests/test_proxy_identity.py::the proxy's log keeps no query string of an agent route`
+  `tests/test_proxy_identity.py::the proxy's log keeps no query of`
+  `tests/test_proxy_identity.py::the proxy's log keeps no token-like request header`
   `tests/test_proxy_agent_mutations.py`
-- **Gap:** A front door, load balancer or client in front of this stack may log a URL
-  (#164); the page says never to send a token in one.
+- **Gap:** A token in a URL path is logged by the API and the proxy, a request
+  header with a name not on the proxy's fixed list is logged by the proxy, and a
+  front door, load balancer or client in front of this stack may log a URL or a
+  header (#164). The page says never to send a token anywhere but the Authorization
+  header.
 
 ### C-115 A client cannot choose the address it is limited by
 
 - **Claim:** The source of a failed agent call is the socket peer, or the address
   the proxy reported when `TRUSTED_PROXY_CIDR` is set and the peer is inside it.
   A client that reaches the API directly and sends its own `X-Real-IP` or
-  `X-Forwarded-For` is still one source.
+  `X-Forwarded-For` is still one source. The source is always a parsed IP address or
+  `unknown`, never text a client sent, and the image starts uvicorn with
+  `--no-proxy-headers`, whose default would let a loopback peer set it.
 - **Asserted in:** `docs/agent-api.md` — "The source** is the socket peer."
 - **Status:** enforced
 - **Enforced by:**
   `server/tests/test_agent_api.py::test_the_source_is_the_peer_and_not_a_header_a_client_chooses`
   `server/tests/test_agent_api.py::test_the_proxys_address_is_believed_only_inside_the_trusted_range`
   `server/tests/test_agent_api.py::test_behind_a_trusted_proxy_each_client_is_its_own_source`
+  `server/tests/test_agent_api.py::test_the_source_is_always_an_address_or_unknown`
+  `server/tests/test_agent_api.py::test_uvicorn_is_started_without_proxy_headers_and_that_matters`
   `server/tests/test_agent_mutations.py::test_each_guard_is_noticed_when_broken`
 
 ### C-116 A weak secret for the opaque ids is refused at startup
 
 - **Claim:** The server refuses to start on an `AGENT_ID_SECRET` shorter than 32
   characters, with fewer than 10 different ones, or made of one short pattern
-  repeated, and the generator the docs give always passes.
+  repeated, and the generator the docs give always passes. This is a filter for
+  obvious mistakes and not a strength test, and the page says so.
 - **Asserted in:** `docs/agent-api.md` — "The server refuses to start on one shorter than 32 characters"
 - **Status:** enforced
 - **Enforced by:**
   `server/tests/test_agent_api.py::test_a_weak_secret_stops_the_server_starting`
   `server/tests/test_agent_api.py::test_a_short_secret_stops_the_server_starting`
+
+### C-117 A manifest with words no display word has is refused before anything changes
+
+- **Claim:** The migrate job reads the framework words from the manifest with a shape
+  and safety filter: it refuses a lone surrogate, a control, zero-width, bidirectional
+  or private-use character, a word over 64 characters or with surrounding space,
+  more than 5,000 words of a kind or 50,000 in all, and a repeated JSON key, before
+  it changes anything. The manifest is trusted build output, and the page says the
+  check is not a judgment of content.
+- **Asserted in:** `docs/agent-api.md` — "A manifest that fails is refused before the job changes anything."
+- **Status:** enforced
+- **Enforced by:**
+  `server/tests/test_agent_vocabulary.py::test_a_word_a_display_word_could_not_be_is_refused`
+  `server/tests/test_agent_vocabulary.py::test_a_word_with_spaces_is_a_display_word`
+  `server/tests/test_agent_vocabulary.py::test_a_manifest_with_too_many_words_overall_is_refused`
+  `server/tests/test_agent_vocabulary.py::test_a_repeated_json_key_is_refused_and_not_silently_resolved`
+  `server/tests/test_agent_vocabulary.py::test_a_manifest_that_cannot_be_loaded_stops_the_job_cleanly`
+  `server/tests/test_agent_vocabulary.py::test_the_api_role_may_only_read_the_vocabulary`
+  `server/tests/test_agent_mutations.py::test_each_guard_is_noticed_when_broken`

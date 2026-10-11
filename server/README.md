@@ -97,9 +97,10 @@ Two optional second locks, both off by default and neither a substitute:
 ranges, and `PROXY_SHARED_SECRET` rejects one that does not carry a secret only
 the proxy knows.
 
-This is why the container does **not** run uvicorn with `--proxy-headers`: that
-would rewrite the peer address from `X-Forwarded-For`, which the client
-controls, and the CIDR check would be checking the attacker's own claim.
+This is why the container runs uvicorn with `--no-proxy-headers` (uvicorn's default
+is to trust `X-Forwarded-For` from a loopback peer): the headers would rewrite the
+peer address from something the client controls, and the CIDR check, and the agent
+API's per-source limit, would be checking the attacker's own claim.
 
 ## Configuration
 
@@ -126,6 +127,8 @@ controls, and the CIDR check would be checking the attacker's own claim.
 | `AGENT_ID_SECRET` | — | Turns the agent API on: at least 32 random characters, keying the opaque ids it shows for people and projects. Empty, no token can be minted and `/api/agent/` answers 404. See [the agent API](../docs/agent-api.md). |
 | `AGENT_RATE_LIMIT_MAX_REQUESTS` | `60` | Calls per agent token per rate-limit window, lower than `RATE_LIMIT_MAX_REQUESTS`. |
 | `AGENT_FAILURE_RATE_LIMIT_MAX_REQUESTS` | `30` | Failed agent calls per source per window; the rest are answered 429 with nothing written. |
+| `AGENT_GLOBAL_FAILURE_RATE_LIMIT_MAX_REQUESTS` | `600` | Failed agent calls all sources together may make per window before every failure is answered 429 with no per-source accounting. |
+| `AGENT_USER_RATE_LIMIT_MAX_REQUESTS` | `120` | Agent calls per window all of one person's tokens share. |
 | `AGENT_MAX_ACTIVE_TOKENS` | `5` | Live agent tokens one person may hold. |
 | `RUN_MIGRATIONS` | `true` | Apply `migrations/*.sql` at boot, under an advisory lock. **Must be `false`** when the API serves as the restricted role (it cannot create tables); `python -m app.migrate` migrates instead. |
 | `APP_DATABASE_URL` | — | The restricted role's connection string. Wins over the pieces below. |

@@ -412,6 +412,27 @@ IDENTITY_HEADERS = [
 BEARER = {"Authorization": "Bearer agt_0123456789abcdef." + "A" * 43}
 
 
+def raw_request(target: str, headers: dict[str, str]) -> bytes:
+    """One HTTP/1.1 request with ``target`` exactly as written (no client cleans or
+    encodes it), over a plain socket. Returns what the server answered."""
+    import socket
+
+    head = f"GET {target} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n"
+    head += "".join(f"{k}: {v}\r\n" for k, v in headers.items()) + "\r\n"
+    with socket.create_connection(("127.0.0.1", PORT), timeout=10) as conn:
+        conn.sendall(head.encode("ascii"))
+        chunks = []
+        while True:
+            try:
+                data = conn.recv(65536)
+            except OSError:
+                break
+            if not data:
+                break
+            chunks.append(data)
+    return b"".join(chunks)
+
+
 def check_agent_route(workdir: Path) -> None:
     """The agent API's route (#164): reachable with no single sign-on, read-only,
     and never an identity.
@@ -569,23 +590,53 @@ def check_agent_route(workdir: Path) -> None:
         f"HTTP {status}",
     )
     # A token put in a URL is refused by the API; the proxy's log must not keep it
-    # either, and must not change what it keeps of any other route.
-    for path in (
-        "/api/agent/me?token=LEAKME111",
-        "/api/Agent/ME?access_token=LEAKME222&x=1",
-        "/api/agent/projects/pr_x?api_key=LEAKME333",
-    ):
-        request(path, BEARER)
+    # either, and must not change what it keeps of an ordinary route. Caddy routes on
+    # the decoded, cleaned path and logs the RAW request target, so the spellings that
+    # make the two differ are each tried, with the raw bytes a client can send.
+    leaks = {
+        "an agent path": "/api/agent/me?token=LEAKME111",
+        "a different case": "/api/Agent/ME?access_token=LEAKME222&x=1",
+        "a project": "/api/agent/projects/pr_x?api_key=LEAKME333",
+        "a percent-encoded letter": "/api/%61gent/me?token=LEAKME444",
+        "an absolute-form target": "http://localhost/api/agent/me?token=LEAKME555",
+        "an absolute-form target in capitals": "HTTP://x/api/agent/me?token=LEAKME666",
+        "a doubled slash": "//api/agent/me?token=LEAKME777",
+        "the prefix alone": "/api/agent?token=LEAKME888",
+        "a dot segment": "/api/./agent/me?token=LEAKME999",
+        "a dot-dot segment": "/api/x/../agent/me?token=LEAKMEAAA",
+        "the word in the query": "/api/me?token=LEAKMEBBB&who=agent",
+        # Over-redaction on purpose: these can reach the agent route after Caddy
+        # cleans them, so the query goes even where the raw path says nothing of it.
+        "a doubled slash without the word": "//api/me?token=LEAKMEC01",
+        "a dot segment without the word": "/api/./me?token=LEAKMEC02",
+        "an absolute-form target without the word": "http://localhost/api/me?token=LEAKMEC03",
+    }
+    for target in leaks.values():
+        raw_request(target, {})
+    raw_request("/api/agent/me", {"X-Api-Key": "LEAKMEHDR1", "Api-Key": "LEAKMEHDR2"})
+    raw_request(
+        "/api/agent/me",
+        {
+            "X-Auth-Token": "LEAKMEHDR3",
+            "X-Authorization": "LEAKMEHDR4",
+            "X-Access-Token": "LEAKMEHDR5",
+        },
+    )
     request("/api/me?visible=KEEPME444", signed_in)
     time.sleep(1)
     logs = docker("logs", CADDY)
     text = logs.stdout + logs.stderr
+    for what, target in leaks.items():
+        secret = target.split("=")[1].split("&")[0]
+        check(f"the proxy's log keeps no query of {what}", secret not in text, secret)
     check(
-        "the proxy's log keeps no query string of an agent route", "LEAKME" not in text
+        "the proxy's log keeps no token-like request header",
+        "LEAKMEHDR" not in text,
+        "a header value was logged",
     )
     check(
-        "and says it was left out",
-        text.count("?[redacted]") >= 3,
+        "and says the query was left out",
+        text.count("?[redacted]") >= len(leaks),
         f"{text.count('?[redacted]')} mark(s)",
     )
     check("every other route's log line is as it was", "visible=KEEPME444" in text)

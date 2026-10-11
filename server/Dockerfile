@@ -69,4 +69,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 # repository's compose.yaml sets. exec so uvicorn is PID 1 and receives
 # SIGTERM directly -- otherwise shutdown waits for the 10s kill timeout and
 # every open SSE stream dies hard instead of closing.
-CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-${API_PORT:-8000}} --no-server-header --timeout-graceful-shutdown 20"]
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-${API_PORT:-8000}} --no-server-header --no-proxy-headers --timeout-graceful-shutdown 20"]
