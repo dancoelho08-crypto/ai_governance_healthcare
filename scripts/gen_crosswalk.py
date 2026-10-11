@@ -18,13 +18,10 @@ months (#174), because nothing connected them. This script connects them:
   is a tripwire for the page's counts and lists, not proof that every sentence is
   true.
 
-Items the page marks as reviewed but "not yet recorded" in the definition (its
-section 7 says which, citing an open question in REQUIREMENTS.md, R-69) are read
-as the page states their relation; the definition must still hold them as
-OPTICA-only with no criteria, so recording them means removing them from that
-sentence. The sentence is accepted only while the question it cites is Open:
-once the owner answers it, the check demands the items be recorded. Counts that
-depend on their unknown criteria are checked as a lower bound only.
+Every count is exact. The page may not say any item is "partial on this page"
+or "not yet recorded": the definition is the one place an item's relation and
+criteria are recorded, and the page states what it holds (the owner dropped the
+claim that OPTICA 5.3 and 7.4 are partial, R-69).
 
 What it does not check, because the definition cannot say: the previous pass's
 figures (tests/test_crosswalk.py checks those against a record of that pass),
@@ -44,7 +41,7 @@ import json
 import re
 import sys
 from collections import Counter
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
@@ -57,7 +54,6 @@ PAGE = ROOT / "docs" / "crosswalk.md"
 OPTICA = ROOT / "app" / "frameworks" / "optica" / "framework.json"
 CHAI = ROOT / "app" / "frameworks" / "chai" / "framework.json"
 OPTICA_DOCS = ROOT / "app" / "frameworks" / "optica" / "docs.toml"
-REQUIREMENTS = ROOT / "REQUIREMENTS.md"
 
 BEGIN = (
     "<!-- Generated from app/frameworks/optica/framework.json by"
@@ -243,24 +239,6 @@ def flat(text: str) -> str:
     return " ".join(text.split())
 
 
-def requirement(requirements: str, rid: str) -> tuple[str, str, str] | None:
-    """An entry of REQUIREMENTS.md: (its title, its status, the section it is in)."""
-    m = re.search(
-        rf"^### {re.escape(rid)} (.+?)$(.*?)(?=^### |^## |\Z)",
-        requirements,
-        re.M | re.S,
-    )
-    if m is None:
-        return None
-    status = re.search(r"^- Status: (.+)$", m.group(2), re.M)
-    sections = re.findall(r"^## (.+)$", requirements[: m.start()], re.M)
-    return (
-        m.group(1).strip(),
-        status.group(1).strip() if status else "",
-        sections[-1].strip() if sections else "",
-    )
-
-
 def reach_grades(page: str, r: Report) -> tuple[dict[Grade, set[str]], list[int]]:
     """Section 6's grading of CHAI's criteria: reached ("genuinely shareable"),
     touched (a fragment) and absent, with the counts it states checked; and the
@@ -293,10 +271,6 @@ def reach_grades(page: str, r: Report) -> tuple[dict[Grade, set[str]], list[int]
     return grades, out_of
 
 
-def is_open(status: str) -> bool:
-    return re.match(r"\**Open\b", status) is not None
-
-
 class Report:
     def __init__(self) -> None:
         self.problems: list[str] = []
@@ -322,12 +296,8 @@ def check(
     optica: dict,
     chai: dict,
     optica_docs: str = "",
-    requirements: str = "",
 ) -> list[str]:
-    """Every problem with the page against the definitions; empty means agreed.
-
-    `requirements` is REQUIREMENTS.md, where the open question that lets an item
-    stay "not yet recorded" lives (R-69)."""
+    """Every problem with the page against the definitions; empty means agreed."""
     r = Report()
     recorded = load_items(optica)
     stages = chai_stages(chai)
@@ -355,56 +325,15 @@ def check(
     except PageError as exc:
         r.problems.append(str(exc))
 
-    # Items reviewed on the page but not yet recorded in the definition, while
-    # the open question the page cites for them (R-69) stays open.
-    pending: set[str] = set()
-    m = re.search(
-        r"not yet recorded there: (.+?) are partial on this page.*?\((R-\d+)\b",
-        text,
-    )
-    if m:
-        pending = set(item_nums(m.group(1)))
-        rid = m.group(2)
-        entry = requirement(requirements, rid)
-        if entry is None:
+    # The definition is the only record of an item's relation: the page may not
+    # claim a different one for items it says are not recorded there (R-69).
+    for phrase in ("partial on this page", "not yet recorded"):
+        if phrase in text:
             r.problems.append(
-                f"the items not yet recorded cite {rid}, which REQUIREMENTS.md lacks"
+                f"the page says {phrase!r}: it states what the definition records,"
+                " and nothing it has not recorded"
             )
-        else:
-            title, status, section = entry
-            if section != "Open questions":
-                r.problems.append(
-                    f"{rid} is not under REQUIREMENTS.md's Open questions"
-                )
-            if not is_open(status):
-                r.problems.append(
-                    f"{rid} is answered ({status or 'no status'}): record"
-                    f" {' and '.join(sorted(pending))} in OPTICA's definition and take"
-                    " them out of the 'not yet recorded' sentence"
-                )
-            r.expect(
-                f"items {rid} asks about", sorted(pending), sorted(item_nums(title))
-            )
-    elif "not yet recorded" in text:
-        r.problems.append(
-            "the page no longer states which reviewed items are not yet recorded, and"
-            " the open question about them, in the form the checker reads (update"
-            " scripts/gen_crosswalk.py with the new wording)"
-        )
-    if m:
-        for num in sorted(pending):
-            it = recorded.get(num)
-            if it is None:
-                r.problems.append(f"{num} is named as not yet recorded, and is no item")
-            elif it.relation is not CrossRefRelation.OPTICA_ONLY or it.ids:
-                r.problems.append(
-                    f"{num} is named as not yet recorded, but the definition records"
-                    f" it ({it.relation}, {list(it.ids)}): remove it from that sentence"
-                )
-    items = {
-        num: replace(it, relation=CrossRefRelation.PARTIAL) if num in pending else it
-        for num, it in recorded.items()
-    }
+    items = recorded
 
     total = len(items)
     relations = Counter(it.relation for it in items.values())
@@ -716,22 +645,8 @@ def check(
     def chapter(ch: int) -> list[Item]:
         return [it for it in items.values() if it.chapter == ch]
 
-    def at_least(what: str, claimed: int, recorded_: int, floor: bool) -> None:
-        """A count the definition gives exactly, or, where an item it holds is not
-        yet recorded (R-69), at least: their criteria could only add to it."""
-        if not floor:
-            r.expect(what, claimed, recorded_)
-        elif claimed < recorded_:
-            r.expect(f"{what} (at least)", claimed, recorded_)
-
     def chapter_criteria(what: str, ch: int, claimed: int) -> None:
-        mine = chapter(ch)
-        at_least(
-            what,
-            claimed,
-            len({c for it in mine for c in it.ids}),
-            any(it.num in pending for it in mine),
-        )
+        r.expect(what, claimed, len({c for it in chapter(ch) for c in it.ids}))
 
     rows = [row for row in table_rows(section_text(page, "2")) if row[0].isdigit()]
     r.expect("chapters in the chapter table", [int(row[0]) for row in rows], chapters)
@@ -745,18 +660,11 @@ def check(
         r.expect(f"items in chapter {ch}", int(row[2]), len(mine))
         claimed_stages = set(row[3].replace(";", " ").split())
         recorded_stages = {c.split("-")[0] for c in ids}
-        if any(it.num in pending for it in mine):
-            r.expect(
-                f"CHAI stages of chapter {ch} (at least)",
-                [],
-                sorted(recorded_stages - claimed_stages),
-            )
-        else:
-            r.expect(
-                f"CHAI stages of chapter {ch}",
-                sorted(claimed_stages),
-                sorted(recorded_stages),
-            )
+        r.expect(
+            f"CHAI stages of chapter {ch}",
+            sorted(claimed_stages),
+            sorted(recorded_stages),
+        )
         chapter_criteria(f"criteria in chapter {ch}", ch, int(row[4]))
         none = sum(it.relation is CrossRefRelation.OPTICA_ONLY for it in mine)
         r.expect(f"unanchored items in chapter {ch}", int(row[5]), none)
@@ -796,7 +704,6 @@ def check(
     ):
         ch = int(m.group(1))
         mine = chapter(ch)
-        floor = any(it.num in pending for it in mine)
         r.expect(f"items in chapter {ch}", number(m.group(2)), len(mine))
         r.expect(
             f"vendor items in chapter {ch}",
@@ -814,11 +721,10 @@ def check(
             len({it.stage for it in mine}),
         )
         chapter_criteria(f"criteria in chapter {ch}", ch, number(m.group(6)))
-        at_least(
+        r.expect(
             f"CHAI stages of chapter {ch}",
             number(m.group(7)),
             len({c.split("-")[0] for it in mine for c in it.ids}),
-            floor,
         )
     if m := r.find(
         r"\*\*Chapters (\d+), (\d+) and (\d+) touch CHAI widely but shallowly\.\*\*"
@@ -1221,7 +1127,6 @@ def main(argv: list[str] | None = None) -> int:
             optica,
             read_json(CHAI),
             OPTICA_DOCS.read_text(encoding="utf-8"),
-            REQUIREMENTS.read_text(encoding="utf-8"),
         )
         for problem in problems:
             print(f"docs/crosswalk.md: {problem}", file=sys.stderr)

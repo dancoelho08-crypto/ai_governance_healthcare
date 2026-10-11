@@ -21,8 +21,8 @@ criterion asks for any part of it.
 | Relation to CHAI | Corrected | Previous pass |
 | ---------------- | --------: | ------------: |
 | Equivalent       |         0 |             3 |
-| Partial          |        61 |            60 |
-| OPTICA-only      |        16 |            14 |
+| Partial          |        59 |            60 |
+| OPTICA-only      |        18 |            14 |
 | **Total items**  |    **77** |        **77** |
 
 **There are no equivalences left.** The previous pass claimed three (1.1 to
@@ -86,9 +86,9 @@ and thinnest where CHAI engineers. Effective coverage inverts that: Stage 4 is
 engineering stage, where it interrogates the development data and the
 developer's process far harder than CHAI does; its weakest is at pilot (2/6).
 
-**Corrections applied.** Nine relation relabels (1.1, 9.3, 12.1 down from
-equivalent to partial; 3.2, 6.3, 7.5, 8.1 down from partial to OPTICA-only;
-5.3 and 7.4 up from OPTICA-only to partial), plus 7.1 retained as partial on a
+**Corrections applied.** Seven relation relabels (1.1, 9.3, 12.1 down from
+equivalent to partial; 3.2, 6.3, 7.5, 8.1 down from partial to OPTICA-only),
+plus 7.1 retained as partial on a
 narrower anchor. Ten citation fixes (+s1-4 at 1.1, +s5-3 at 1.6, +s3-2 at
 3.6, +s2-1 at 4.3, -s5-1 at 7.12, +s2-7 at 10.7, +s3-7 at 11.3 and 11.6,
 +s1-3 and +s6-6 at 12.2). Seven misquotes repaired, the consequential ones
@@ -148,9 +148,9 @@ different), **Minimal** (one thin anchor or none).
 | 2  | Alternatives         |  3 | s1             |    1 |    2 | Minimal  |
 | 3  | Population           |  6 | s3; s1 s2 s4   |    5 |    2 | Limited  |
 | 4  | Input data           | 10 | s3; s1 s2 s4 s6|    9 |    2 | Limited  |
-| 5  | Output data          |  6 | s2; s1 s3 s4   |    7 |    0 | Limited  |
+| 5  | Output data          |  6 | s2; s1 s3 s4   |    6 |    1 | Limited  |
 | 6  | Development process  |  6 | s1 s2 s3 s4    |    4 |    4 | Minimal  |
-| 7  | Performance          | 12 | s4; s1 s3 s5   |   10 |    3 | Limited  |
+| 7  | Performance          | 12 | s4; s1 s3 s5   |   10 |    4 | Limited  |
 | 8  | Explainability       |  3 | s4             |    1 |    1 | Minimal  |
 | 9  | Regulatory/security  |  4 | s1; s2 s3 s4 s5|    5 |    0 | Moderate |
 | 10 | Deployment plan      |  7 | s2; s1 s3 s4 s5|    9 |    0 | Limited  |
@@ -171,10 +171,10 @@ stratified. If you are working from an OPTICA dossier, this is the one chapter
 where CHAI will add requirements rather than absorb yours.
 
 **Chapters 2, 6, 8 and 13 are where OPTICA is effectively alone.** Nine of
-OPTICA's 16 unanchored items sit in these four chapters: how you chose between
+OPTICA's 18 unanchored items sit in these four chapters: how you chose between
 candidates, how the model was actually built, whether global attribution
 exists, and whether this purchase fits the organization's AI portfolio. The
-other seven are scattered through chapters 3, 4 and 7.
+other nine are scattered through chapters 3, 4, 5 and 7.
 
 **Chapter 7 (performance) is the most structurally awkward.** Twelve items,
 six answerable only by the vendor and six only by the adopter, spanning four
@@ -182,14 +182,13 @@ completion stages and ten CHAI criteria across four CHAI stages. It is also
 where the clock conflict in section 5 does the most damage.
 
 **Chapters 3, 4 and 5 touch CHAI widely but shallowly.** They cite five, nine
-and seven distinct criteria respectively (chapter 5's seven counts the one
-criterion 5.3 reaches, which section 7 explains is not yet recorded), yet almost
+and six distinct criteria respectively, yet almost
 every mapping carries substantial residue, because CHAI documents data at
 dataset level while OPTICA works per cohort rule, per variable and per label.
 
 ## 3. Where each framework is alone
 
-**What OPTICA asks that CHAI never does** (16 items, grouped):
+**What OPTICA asks that CHAI never does** (18 items, grouped):
 
 *Choosing between candidates* (2.2, 2.3, 7.8). A scored head-to-head of the
 shortlist against pre-set thresholds with every number attributed to its
@@ -198,6 +197,11 @@ the chosen product's claims against the alternatives. CHAI's s1-2 asks whether
 AI is an appropriate intervention, which is a question about the class of
 intervention, not about which product to buy. Nothing in CHAI's 41 criteria
 mentions cost, cost of ownership or a competing offering.
+
+*Output and evaluation-sample disclosures* (5.3, 7.4). The window over which a
+forecast event was ascertained, where the model forecasts something; and
+whether the evaluation sample preserves the real-world balance of outcomes or
+was deliberately resampled.
 
 *How the model was built* (3.4, 6.1, 6.2, 6.3, 6.4, 8.1). Partition design and
 whether patients leak across splits; the algorithm, objective, tuning and
@@ -320,13 +324,15 @@ clinical expert, the organizational data lead or the organizational AI lead.
 
 Three consequences for a shared-answer strategy.
 
-**Ten of the 29 vendor items have no CHAI anchor at all** (3.2, 3.4, 4.2, 6.1,
-6.2, 6.3, 6.4, 7.5, 7.6, 8.1). A vendor that has conscientiously completed a
-CHAI program has had no reason to prepare any of them. These are the
-cohort count, the split design, the input specification, four of the six
-development-process questions, the two evidence-base disclosures and global
-feature importance. If your procurement depends on them, they must be written
-into the contract; no assurance credential will have produced them.
+**Twelve of the 29 vendor items have no CHAI anchor at all** (3.2, 3.4, 4.2,
+5.3, 6.1, 6.2, 6.3, 6.4, 7.4, 7.5, 7.6, 8.1). A vendor that has
+conscientiously completed a CHAI program has had no reason to prepare any of
+them. These are the cohort count, the split design, the input specification,
+the forecast ascertainment window, four of the six development-process
+questions, the evaluation sample's outcome balance, the two evidence-base
+disclosures and global feature importance. If your procurement depends on
+them, they must be written into the contract; no assurance credential will
+have produced them.
 
 **Three CHAI criteria are reachable, in this crosswalk, only through items the
 vendor alone can answer**: s2-3 (via 3.5), s3-3 (via 6.5) and s4-2 (via 6.5
@@ -479,11 +485,11 @@ report them as covered.
     decline branch was used.
 
 **And in the other direction**, for an organization that already runs CHAI and
-is adopting OPTICA: expect to obtain 29 answers from the vendor, of which ten
-correspond to nothing CHAI ever asked for, and to write 16 OPTICA items that
+is adopting OPTICA: expect to obtain 29 answers from the vendor, of which twelve
+correspond to nothing CHAI ever asked for, and to write 18 OPTICA items that
 have no CHAI source at all - the procurement comparison, the model's
 construction, the vendor's evidence base including its negatives, and the
-portfolio judgment. Those 16 are the reason to run OPTICA, not an overhead on
+portfolio judgment. Those 18 are the reason to run OPTICA, not an overhead on
 top of CHAI.
 
 ## 7. Item by item
@@ -504,12 +510,6 @@ cannot be derived from the definition: the previous pass's figures (checked by
 the history of the audit, and the reviewer's grading of each criterion as
 reached, touched or absent, which is checked only for agreeing with itself
 and with what is cited.
-
-Two items are not yet recorded there: 5.3 and 7.4 are partial on this page, but
-this page does not name the CHAI criteria they reach, so the definition still
-marks them OPTICA-only and the dashboard shows them as not covered by CHAI.
-Which criteria they cite is an open question for the owner (R-69 in
-REQUIREMENTS.md, #174).
 
 <!-- Generated from app/frameworks/optica/framework.json by scripts/gen_crosswalk.py (pixi run gen-crosswalk). Do not edit by hand. -->
 
@@ -609,7 +609,7 @@ An earlier pass of this analysis ran on a corrupted input, in which CHAI stages
 uncovered CHAI criteria) were wrong in both directions and are not used here.
 
 The underlying data is committed as OPTICA's framework definition,
-[`app/frameworks/optica/framework.json`](https://github.com/tonyreina/ai_governance_healthcare/blob/main/app/frameworks/optica/framework.json),
-apart from the two items named in section 7. The per-item view is generated
+[`app/frameworks/optica/framework.json`](https://github.com/tonyreina/ai_governance_healthcare/blob/main/app/frameworks/optica/framework.json).
+The per-item view is generated
 from it into section 7 and onto the
 [OPTICA checklist](frameworks/optica-checklist.md) page.

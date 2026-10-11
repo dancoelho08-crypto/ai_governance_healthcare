@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """docs/crosswalk.md and OPTICA's framework definition cannot disagree (#174, D-84).
 
-The crosswalk page described the corrected mapping (0 equivalent, 61 partial,
-16 OPTICA-only, 36 CHAI criteria cited) while the definition the dashboard and
+The crosswalk page described a corrected mapping (0 equivalent, then 61 partial
+and 16 OPTICA-only, 36 CHAI criteria cited) while the definition the dashboard and
 the generated OPTICA checklist are drawn from still held the earlier pass (3
 equivalent, 60 partial, 14 OPTICA-only, 35 cited). Nothing connected the two.
 scripts/gen_crosswalk.py now writes the page's item table from the definition
@@ -13,18 +13,20 @@ against it (the page's section 7 says what cannot be, and is not). This suite:
 * shows the check finding the original #174 disagreement: the page against the
   definition as it was before the fix;
 * breaks the definition one way at a time (one relation, one criterion id, one
-  "who answers", an equivalence back, a "not yet recorded" item recorded) and
+  "who answers", an equivalence back, a criterion recorded for 5.3 while the page
+  says OPTICA-only) and
   demands the check notice, both with the table left stale and with the table
   regenerated, so a regenerated table cannot hide a broken claim;
 * breaks the page one way at a time (a headline count, an id in the table, the
-  never-cited list, a citation fix, a reworded claim, the markers, the "not yet
-  recorded" sentence, and each countable sentence in the prose: the chapter
+  never-cited list, a citation fix, a reworded claim, the markers, the dropped
+  claim that 5.3 and 7.4 are partial or "not yet recorded" put back, a chapter 5
+  or 7 count off by one, and each countable sentence in the prose: the chapter
   splits, the gain over the previous pass, the stages the relay puts a CHAI
   criterion at, the reached/touched/absent lists and tables, the chapter counts)
   and demands the check notice, including the two chapter sentences #174's
   verifier found false, restored;
-* ties the "not yet recorded" items to the open question R-69: answering it, or
-  dropping it, while the items are still unrecorded is a failure;
+* demands every count be exact: the page may not call 5.3 or 7.4 partial, "not
+  yet recorded" or a lower bound (R-69, answered: the claim was dropped);
 * checks the previous pass's figures on the page against a record of that pass;
 * checks the Who enum the checker reads matches the definition's own ``whos``;
 * checks the pre-commit hook runs the check when the page, the definitions or
@@ -44,6 +46,7 @@ import re
 import sys
 import tomllib
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 import yaml
@@ -61,7 +64,6 @@ PAGE = gen.PAGE.read_text(encoding="utf-8")
 OPTICA = json.loads(gen.OPTICA.read_text(encoding="utf-8"))
 CHAI = json.loads(gen.CHAI.read_text(encoding="utf-8"))
 OPTICA_DOCS = gen.OPTICA_DOCS.read_text(encoding="utf-8")
-REQUIREMENTS = gen.REQUIREMENTS.read_text(encoding="utf-8")
 PRECOMMIT = ROOT / ".pre-commit-config.yaml"
 PIXI = ROOT / "pixi.toml"
 # Each item's crossRefs and who answers as the definition held them before #174
@@ -81,10 +83,8 @@ def item(defn: dict, num: str) -> dict:
     return next(i for s in defn["sections"] for i in s["items"] if i["num"] == num)
 
 
-def problems(
-    page: str = PAGE, optica: dict = OPTICA, requirements: str = REQUIREMENTS
-) -> list[str]:
-    return gen.check(page, optica, CHAI, OPTICA_DOCS, requirements)
+def problems(page: str = PAGE, optica: dict = OPTICA) -> list[str]:
+    return gen.check(page, optica, CHAI, OPTICA_DOCS)
 
 
 def regenerated(optica: dict) -> str:
@@ -127,18 +127,6 @@ def page_mutation(name: str, old: str, new: str, expect: str) -> None:
         check(f"{name}: the text is on the page once", False, f"{count}x {old!r}")
         return
     found = problems(PAGE.replace(old, new), OPTICA)
-    check(name, any(expect in p for p in found), f"wanted {expect!r} in {found}")
-
-
-def requirements_mutation(name: str, old: str, new: str, expect: str) -> None:
-    """Edit REQUIREMENTS.md once; the check must notice, and name `expect`."""
-    count = REQUIREMENTS.count(old)
-    if count != 1:
-        check(
-            f"{name}: the text is in REQUIREMENTS.md once", False, f"{count}x {old!r}"
-        )
-        return
-    found = problems(PAGE, OPTICA, REQUIREMENTS.replace(old, new))
     check(name, any(expect in p for p in found), f"wanted {expect!r} in {found}")
 
 
@@ -200,11 +188,16 @@ def main() -> int:
         lambda d: item(d, "11.3").update(who="adopter"),
         "who answers 11.3",
     )
-    definition_mutation(
-        "a not-yet-recorded item recorded (5.3)",
-        lambda d: item(d, "5.3")["crossRefs"].update(relation="partial", ids=["s3-2"]),
-        "5.3 is named as not yet recorded",
-    )
+    # R-69 was answered by dropping the claim: if the definition ever records a
+    # criterion for 5.3 or 7.4, a page that still says OPTICA-only understates.
+    for num, criterion in (("5.3", "s3-2"), ("7.4", "s4-3")):
+        definition_mutation(
+            f"a criterion recorded for {num} while the page says OPTICA-only",
+            lambda d, num=num, criterion=criterion: item(d, num)["crossRefs"].update(
+                relation="partial", ids=[criterion]
+            ),
+            "headline Partial",
+        )
     # An id the page's prose never speaks to: only the table can notice, which is
     # why the table is on the page. Regenerating it is then the reviewable change.
     definition_mutation(
@@ -251,7 +244,7 @@ def main() -> int:
     print("A broken page is noticed")
     page_mutation(
         "a headline count changed",
-        "| Partial          |        61 |",
+        "| Partial          |        59 |",
         "| Partial          |        60 |",
         "headline Partial",
     )
@@ -301,20 +294,99 @@ def main() -> int:
         "",
         "between exactly one pair of markers",
     )
+    for num in ("5.3", "7.4"):
+        page_mutation(
+            f"{num} listed as partial in the table",
+            next(line for line in PAGE.splitlines() if line.startswith(f"| {num} |")),
+            f"| {num} | developer | partial | s3-2 |",
+            "stale",
+        )
+        other = "7.4" if num == "5.3" else "5.3"
+        page_mutation(
+            f"{num} dropped from the OPTICA-only groups (as if partial)",
+            "(5.3, 7.4). The window",
+            f"({other}). The window",
+            "OPTICA-only items in the groups",
+        )
     page_mutation(
-        "a recorded item named as not yet recorded",
-        "recorded there: 5.3 and 7.4 are partial",
-        "recorded there: 5.3, 7.2 and 7.4 are partial",
-        "7.2 is named as not yet recorded",
+        "the earlier headline restored (61 partial)",
+        "| Partial          |        59 |",
+        "| Partial          |        61 |",
+        "headline Partial",
     )
+    page_mutation(
+        "the earlier headline restored (16 OPTICA-only)",
+        "| OPTICA-only      |        18 |",
+        "| OPTICA-only      |        16 |",
+        "headline OPTICA-only",
+    )
+    page_mutation(
+        "the earlier count of OPTICA-only items restored (16 items, grouped)",
+        "(18 items, grouped)",
+        "(16 items, grouped)",
+        "OPTICA-only items listed",
+    )
+    page_mutation(
+        "the 'not yet recorded' paragraph restored",
+        "<!-- Generated from",
+        "Two items are not yet recorded there: 5.3 and 7.4 are partial on this"
+        " page, but\nthis page does not name the CHAI criteria they reach.\n\n"
+        "<!-- Generated from",
+        "'not yet recorded'",
+    )
+    page_mutation(
+        "5.3 and 7.4 called partial on this page",
+        "<!-- Generated from",
+        "5.3 and 7.4 are partial on this page.\n\n<!-- Generated from",
+        "'partial on this page'",
+    )
+    for what, old, new, expect in (
+        (
+            "chapter 5's criteria count one too high",
+            "| 5  | Output data          |  6 | s2; s1 s3 s4   |    6 |    1 |",
+            "| 5  | Output data          |  6 | s2; s1 s3 s4   |    7 |    1 |",
+            "criteria in chapter 5",
+        ),
+        (
+            "chapter 5's unanchored count one too low",
+            "| 5  | Output data          |  6 | s2; s1 s3 s4   |    6 |    1 |",
+            "| 5  | Output data          |  6 | s2; s1 s3 s4   |    6 |    0 |",
+            "unanchored items in chapter 5",
+        ),
+        (
+            "chapter 7's unanchored count one too low",
+            "| 7  | Performance          | 12 | s4; s1 s3 s5   |   10 |    4 |",
+            "| 7  | Performance          | 12 | s4; s1 s3 s5   |   10 |    3 |",
+            "unanchored items in chapter 7",
+        ),
+        (
+            "chapter 7's criteria count one too high",
+            "| 7  | Performance          | 12 | s4; s1 s3 s5   |   10 |    4 |",
+            "| 7  | Performance          | 12 | s4; s1 s3 s5   |   11 |    4 |",
+            "criteria in chapter 7",
+        ),
+        (
+            "chapter 5's stage set one stage short",
+            "| 5  | Output data          |  6 | s2; s1 s3 s4   |",
+            "| 5  | Output data          |  6 | s2; s1 s3      |",
+            "CHAI stages of chapter 5",
+        ),
+    ):
+        page_mutation(what, old, new, expect)
 
     print("Each countable sentence in the prose is checked")
     for name, old, new, expect in (
         (
             "the false chapter 3, 4 and 5 counts restored (nine, nine and seven)",
-            "They cite five, nine\nand seven distinct criteria",
+            "They cite five, nine\nand six distinct criteria",
             "They cite nine, nine\nand seven distinct criteria",
             "criteria chapter 3 cites",
+        ),
+        (
+            "chapter 5's count restored to seven, which counted 5.3 as partial",
+            "They cite five, nine\nand six distinct criteria",
+            "They cite five, nine\nand seven distinct criteria",
+            "criteria chapter 5 cites",
         ),
         (
             "the false chapter 7 shape restored (six criteria, three CHAI stages)",
@@ -323,8 +395,7 @@ def main() -> int:
             "criteria in chapter 7",
         ),
         (
-            # At least: 7.4 is not yet recorded (R-69), so its criteria could add.
-            "chapter 7's CHAI stages below what is recorded",
+            "chapter 7's CHAI stages one too few",
             "ten CHAI criteria across four CHAI stages",
             "ten CHAI criteria across three CHAI stages",
             "CHAI stages of chapter 7",
@@ -512,57 +583,16 @@ def main() -> int:
         ),
         (
             "the development-process questions with no anchor",
-            "four of the six\ndevelopment-process questions",
-            "three of the six\ndevelopment-process questions",
+            "four of the six development-process\nquestions",
+            "three of the six development-process\nquestions",
             "development-process questions with no anchor",
         ),
     ):
         page_mutation(name, old, new, expect)
 
-    print("The 'not yet recorded' items are tied to the open question R-69")
-    check(
-        "R-69 is an open question",
-        gen.requirement(REQUIREMENTS, "R-69") is not None
-        and gen.is_open(gen.requirement(REQUIREMENTS, "R-69")[1])
-        and gen.requirement(REQUIREMENTS, "R-69")[2] == "Open questions",
-        f"{gen.requirement(REQUIREMENTS, 'R-69')}",
-    )
-    r69 = REQUIREMENTS[REQUIREMENTS.index("### R-69") :]
-    status = r69[r69.index("- Status:") : r69.index("\n", r69.index("- Status:"))]
-    requirements_mutation(
-        "R-69 answered while 5.3 and 7.4 are unrecorded",
-        status,
-        "- Status: **Answered** (5.3 cites s3-2)",
-        "R-69 is answered",
-    )
-    requirements_mutation(
-        "R-69 removed",
-        "### R-69 Which CHAI criteria",
-        "### R-99 Which CHAI criteria",
-        "R-69, which REQUIREMENTS.md lacks",
-    )
-    requirements_mutation(
-        "R-69 no longer asks about 7.4",
-        "do OPTICA 5.3 and 7.4 cite?",
-        "does OPTICA 5.3 cite?",
-        "items R-69 asks about",
-    )
-    page_mutation(
-        "the sentence no longer cites R-69",
-        "(R-69 in\nREQUIREMENTS.md, #174)",
-        "(#174)",
-        "not yet recorded, and the open question about them",
-    )
-    page_mutation(
-        "the sentence cites an answered question (R-21)",
-        "(R-69 in\nREQUIREMENTS.md, #174)",
-        "(R-21 in\nREQUIREMENTS.md, #174)",
-        "R-21 is answered",
-    )
-
     print("The previous pass's figures match a record of that pass")
     earlier_items = {
-        num: gen.replace(
+        num: replace(
             items[num],
             relation=gen.CrossRefRelation(raw["crossRefs"]["relation"]),
             ids=tuple(raw["crossRefs"]["ids"]),
@@ -659,10 +689,13 @@ def main() -> int:
         "app/frameworks/optica/docs.toml",
         "scripts/gen_crosswalk.py",
         "scripts/framework_enums.py",
-        "REQUIREMENTS.md",
     ):
         check(f"runs on {path}", bool(pattern.search(path)))
     check("does not run on an unrelated file", not pattern.search("README.md"))
+    check(
+        "no longer reads REQUIREMENTS.md (R-69 is answered)",
+        not pattern.search("REQUIREMENTS.md") and not hasattr(gen, "REQUIREMENTS"),
+    )
     tasks = tomllib.loads(PIXI.read_text(encoding="utf-8"))["tasks"]
     check(
         "check-crosswalk checks",

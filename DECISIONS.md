@@ -2537,7 +2537,8 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
 
 - Status: Proposed (built for #174; the owner has not yet confirmed it)
 - **The problem.** docs/crosswalk.md described the reviewed, corrected crosswalk
-  (0 equivalent, 61 partial, 16 OPTICA-only, 36 CHAI criteria cited) while OPTICA's
+  (0 equivalent, 61 partial, 16 OPTICA-only, 36 CHAI criteria cited; 59 and 18
+  after the owner dropped the 5.3 and 7.4 claim) while OPTICA's
   definition, which the dashboard's "covered by CHAI" chips and the generated
   OPTICA checklist are drawn from, still held the earlier pass (3 equivalent, 60
   partial, 14 OPTICA-only, 35 cited, no s3-7). Nothing connected the two, so the
@@ -2588,18 +2589,18 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
   criteria across four CHAI stages, not six across three), and a third ("No
   chapter can be completed by one party": chapters 1, 2, 6, 9, 12 and 13 can
   be); all three are corrected from the data and now checked.
-- **Reviewed but not recorded.** The page moves 5.3 and 7.4 from OPTICA-only to
-  partial without naming the CHAI criteria they reach. A partial with no
-  criteria would show in the app as "No CHAI criterion covers this", so the
-  definition keeps them OPTICA-only and the page says so in section 7, citing
-  the open question R-69. The check reads them as the page's relation, requires
-  the definition to still hold them unrecorded (so recording them means
-  removing them from that sentence), and checks the counts their criteria could
-  change (chapter 5's and chapter 7's) as lower bounds. It accepts the sentence
-  only while R-69, which it reads from REQUIREMENTS.md, is under Open questions,
-  has the status Open and names the same items: once the owner answers R-69,
-  the check fails until they are recorded. The owner decided on 2026-10-10 to
-  leave both unresolved (R-69).
+- **Reviewed but not recorded: the claim is dropped.** The page had moved 5.3 and
+  7.4 from OPTICA-only to partial without naming the CHAI criteria they reach,
+  while the definition kept them OPTICA-only, and an escape hatch in the check
+  read them as the page said while the open question R-69 stayed Open, with the
+  counts they could change checked as lower bounds. The owner decided on
+  2026-10-10 to drop the claim (R-69, answered). The escape hatch is removed:
+  the check no longer reads REQUIREMENTS.md, every count is exact (chapters 5
+  and 7 included, with no lower bounds), and it fails if the page says any item
+  is "partial on this page" or "not yet recorded". 5.3 and 7.4 are OPTICA-only
+  on the page as in the definition, which records no criterion for either, and
+  the page's counts are the definition's (59 partial, 18 OPTICA-only). Prose
+  that depended on their being partial was deleted, not rewritten.
 - **A relation and its ids agree.** `scripts/check_framework.py` requires an
   equivalent or partial crossRef to name at least one item and an OPTICA-only
   one to name none, so the definition cannot record a partial the chip would
@@ -2631,11 +2632,13 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
   table on the page (two copies, the failure #174 already was); parsing only the
   headline numbers (a changed criterion id would pass whenever the counts
   happened to hold); guessing 5.3's and 7.4's criteria from the chapter table's
-  totals (the page constrains them but does not name them); recording 5.3 and
+  totals (the page constrained them but did not name them); recording 5.3 and
   7.4 as partial with no ids (the chip would say "not covered" while the data
-  said partial, which the new coherence rule now refuses); claiming on the page
-  that "every count" is checked while the reached/touched/absent grading cannot
-  be (softened to what is checked, and that grading checked for consistency).
+  said partial, which the new coherence rule now refuses); keeping the "not yet
+  recorded" escape hatch while R-69 was open (dropped with the claim); claiming
+  on the page that "every count" is checked while the reached/touched/absent
+  grading cannot be (softened to what is checked, and that grading checked for
+  consistency).
 - Source: #174; the #168 coupling map that found it; docs/crosswalk.md; the
   verifier's findings on the #174 branch; the owner's answer on 5.3 and 7.4
   (2026-10-10, R-69).
@@ -2644,13 +2647,15 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
   committed page and definitions agree; the original #174 disagreement, from a
   fixture of the earlier pass, is found; one relation, one criterion id added,
   removed or swapped, one "who answers", an equivalence back and a
-  not-yet-recorded item recorded are each caught in the definition, with the
+  criterion recorded for 5.3 or 7.4 while the page says OPTICA-only are each
+  caught in the definition, with the
   table stale and with it regenerated; a headline count, an id or relation in
   the table, the never-cited list, a citation fix, a chapter count, the
-  producer split, a reworded claim, the markers and the "not yet recorded"
-  sentence are each caught on the page, as is each countable prose sentence
-  (the two false chapter sentences restored among them); R-69 answered, removed
-  or naming other items is caught; a crossRef to another framework is caught.
+  producer split, a reworded claim, the markers, 5.3 or 7.4 listed as partial,
+  61 partial and 16 OPTICA-only restored, the "not yet recorded" paragraph
+  restored and a chapter 5 or 7 count off by one are each caught on the page,
+  as is each countable prose sentence (the two false chapter sentences restored
+  among them); a crossRef to another framework is caught.
   `tests/test_check_framework.py` (`pixi run test-check-framework`) shows the
   coherence rule failing (9.1 partial with no ids, 2.2 OPTICA-only with s1-2).
   `tests/test_optica.py` (`pixi run test-app`) checks each chip in a browser.
