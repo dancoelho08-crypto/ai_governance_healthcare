@@ -50,8 +50,9 @@ attributable and reviewable.
   rationale, and a sign-off history attributed to the signed-in person.
 - **Applied model card** following the field structure of the CHAI Applied Model
   Card, with a live preview, and a picker for CHAI's recommended metrics.
-- **OPTICA adoption review**, optional per project: 77 questions answered by five
-  stakeholders, never mixed into the CHAI status.
+- **OPTICA adoption review**, optional per project: 77 questions in 13 chapters,
+  each marked as answered by your organization, the solution's developer or
+  either, never mixed into the CHAI status.
 - **An audit trail enforced by the database**: append-only history, a record of
   who read what, retention periods, litigation holds and subject-access tools.
 - **Exports**: standalone HTML report, PDF, Markdown, JSON (per project) and CSV

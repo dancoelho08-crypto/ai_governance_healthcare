@@ -43,7 +43,7 @@
     "cardDeclined": "optica.card.declined",
     "whoOwes": "optica.whoOwes",
     "relay": "optica.relay",
-    "colWho": "optica.col.stakeholder",
+    "colWho": "optica.col.who",
     "colOutstanding": "optica.col.outstanding",
     "neverTitle": "optica.neverTitle",
     "neverDetail": "optica.neverDetail",

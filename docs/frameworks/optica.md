@@ -51,6 +51,11 @@ This is the part that distinguishes OPTICA from a flat checklist. Items are
 assigned to **five stakeholders** and completed in **seven ordered stages**
 (A–G), with each stage completed by a single stakeholder.
 
+The dashboard shows less than this. It groups outstanding items by who can
+answer them (your organization, the solution's developer, or either party), a
+three-valued reading of each item's stakeholder. It shows neither the five
+stakeholders nor the stages, though the definition records both for every item.
+
 | Stakeholder | Role in the process |
 |---|---|
 | **Clinical expert** | Leads the evaluation. Defines the need and the performance bar, then returns at later stages to judge other stakeholders' answers clinically |
