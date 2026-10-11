@@ -944,7 +944,32 @@ honest answer and is a gap worth closing; see R-19.
 - American spelling in prose, code, comments, docstrings, commit messages and
   UI copy. Quoted material and third-party field names keep their original
   spelling.
-- Enforced by: `pixi run check-spelling` (pre-commit).
+- Enforced by: `pixi run check-spelling` (pre-commit, and CI through the lint
+  workflow's `prek run --all-files`), which generates each listed root's
+  inflections, the British medical roots among them, matches listed words only
+  whole, and also reports a lowercase word that holds a British medical segment
+  anywhere in it, whatever word stands before it, except a true Latin epithet
+  after its genus (D-81): a word with a Latin ending that is neither an English
+  medical form (-ia, so every -aemia, -oea, so every -rrhoea and -pnoea, -oma,
+  -itis, -sis), a listed word (but for the one listed epithet) nor one of a
+  closed list of English nouns that look Latin
+  ("caecum", "haemoperitoneum" <!-- spelling-ok -->
+  and four more), so an English word after a genus is still reported; the genus
+  is a listed name, or one capital and a period that starts the text or follows
+  whitespace and not a word such as Dr, Hep, Group or Twin; and a listed true
+  epithet passes wherever it stands. Nothing rewrites a file: `pixi run
+  fix-spelling` prints a patch of suggested respellings for a person to review
+  and `git apply`, and lists every other hit to fix by hand. So quoted material
+  is never respelled by a tool; the check still reports a quoted British word,
+  which needs `spelling-ok` on its line or a scoped `.spelling-allow` entry. The
+  checker is itself tested by `pixi run test-check-spelling` (CI and
+  pre-commit), including a verifier's corpus, the en_US dictionary, that
+  `--fix` writes nothing, that its patch applies, and mutation tests (#169).
+- Not enforced: commit messages (the check reads files, not messages); any
+  British word whose root is not on the list and whose shape is not a rule;
+  "leucotomy" and "pharmacopoeia", which the en_US dictionary accepts; and the
+  respelling of every hit, which rests on a person (applying the patch, or
+  fixing the listed hits by hand). These rest on review.
 
 ### R-18 A closed set of values has an enumerated type
 

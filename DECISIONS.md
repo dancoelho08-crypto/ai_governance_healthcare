@@ -1978,6 +1978,302 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
   broken and rebuilt, and requires the check and node to agree on every script
   of `tests/check_app_cases.py`.
 
+### D-81 The spelling guard: listed roots, broad reports, suggestions only
+
+- Status: Proposed (built for #169; the owner has not yet confirmed it)
+- **Nothing is ever written.** `pixi run check-spelling` reports. `pixi run
+  fix-spelling` (`--fix`) prints, on stdout, a unified diff of suggested
+  respellings that `git apply` takes, with paths from the repository root
+  (a file outside it is named as given when that is a relative path that does
+  not climb; one given by an absolute path or with "..", which `git apply`
+  refuses, is left out of the patch, said so on stderr, and makes the exit 1),
+  under a header saying the patch is a
+  suggestion to review before applying, and lists on stderr every other hit,
+  with the reason it is not in the patch, for a person to fix by hand. It
+  exits 1 when there is any hit, or a file it cannot read. There is no flag
+  that writes a file. Five rounds of review showed an in-place rewriter built
+  on heuristics corrupting the owner's text each time a heuristic misread it
+  (a genus in emphasis, link labels, `<pre>` and `<script>`, front matter,
+  templates, package names, French, quotations). A suggestion a person reviews
+  makes that imperfection harmless.
+- **Roots, not words.** `scripts/check_spelling.py` holds British roots in
+  families (-our, -re, -ce, -ise, -yse, a doubled l), and generates each root's
+  inflections and prefixed forms (plural, -ed, -ing, -er, -able, -isation,
+  -llist, un-, re-, mis- and the like). Words in no family are listed in
+  `EXPLICIT` with their inflections spelled out, and none of them may also be
+  generated. A list of exact forms missed a plural while it listed the singular
+  (#169), and every other unlisted inflection would have passed the same way. A
+  generated form that is not a real word is harmless: each keeps the British
+  part of its root, so it can only match a British spelling. Forms that are
+  American too ("analyses", "cancellation", "enrolled", "programmed") are never
+  generated.
+- **Medical spellings are roots too, matched as whole words.** `MEDICAL` lists
+  British medical stems (the stems of
+  haemorrhage, haematology, oedema, oesophagus, <!-- spelling-ok -->
+  oestrogen, foetus, faeces and anaesthesia, <!-- spelling-ok -->
+  the -aemia, -rrhoea and -pnoea stems, <!-- spelling-ok -->
+  the sulphur, paediatric and coeliac stems <!-- spelling-ok -->
+  and the rest), each with a closed set of English endings and a few known
+  prefixes. A listed word is caught only if it is one of the generated forms,
+  entire, so "phytoestrogen" and "proestrus" are not touched. No listed ending
+  is -alis, -ium, -icus, -ica, -ae or -ensis, so a species epithet such as
+  faecalis is never listed; <!-- spelling-ok -->
+  a few listed English words end in a Latin-looking -us or -i
+  (foetus, oestrus, oesophagus, oesophagi). <!-- spelling-ok -->
+  The -our and -re roots also take a few closed compounds
+  (colourblind, harbourmaster, centrefold, theatregoer), <!-- spelling-ok -->
+  and the -our family the prefix re-.
+- **Reporting is broad.** A false report costs a `spelling-ok` marker; a
+  missed one costs the rule. Every listed hit is reported, in any case, and
+  every shape hit, whatever word stands before it: the earlier rule that
+  silenced a word after a capitalized word that was not a sentence opener hid
+  "Severe hyperammonaemia" and "NHS haemovigilance" <!-- spelling-ok -->
+  (the verifier's 132 combinations), and is removed.
+- **Shapes match inside a word.** A lowercase word is reported when it holds a
+  British medical segment anywhere and is longer than the segment
+  (`SHAPES`, `by_shape()`):
+  haem, oedem, oesophag, oestr, foet, faec, caec, paed, <!-- spelling-ok -->
+  aesthe after an-, kin-, syn-, par-, dys-, hyper-, <!-- spelling-ok -->
+  hypo-, hyp- or cen- (so every anaes- word), <!-- spelling-ok -->
+  gynae, aetio, the British leuco- stems (leucocyt-, <!-- spelling-ok -->
+  leucopen-, leucodystroph-, leucotom-, leucotrien-, <!-- spelling-ok -->
+  leucopoie-, leucoencephal-, leucoplak-, leucoderm-, <!-- spelling-ok -->
+  leucaem-), <!-- spelling-ok -->
+  palaeo, praecord, pharmacopoei, spirochaet, sulph, tumour, <!-- spelling-ok -->
+  -rrhoe-, -pnoe-, -aemia and -aemic, and, only at the end, <!-- spelling-ok -->
+  -litre and -gramme; and the word gynae. <!-- spelling-ok -->
+  Where an American word holds a segment's letters by accident, the pattern is
+  narrowed: an oe- segment counts only at the start or after "a", "i", "o"
+  or "y", each with a British word only it lets through (American
+  "videoedema", "phytoestrogen", "shoestring" are clean, so a British compound
+  with another letter before it, such as
+  lipoedema, must be listed); <!-- spelling-ok -->
+  "haem" inside a word only before "a" or "o" ("alphaemission"); "foet" only
+  before an English ending ("infoetl"); "aesthe" only after those prefixes
+  ("aesthetic", "nonaesthetic", "antiaesthetic"); "leuco" only in those
+  stems, because American geology, botany and chemistry keep it
+  ("leucocratic", "leucoplast", "leucomalachite"; `spelling_corpus/american.txt`
+  keeps the verifier's list of them). The verifier's 131 medical words
+  (`tests/fixtures/spelling_corpus/medical.txt`) are reported, but for two the
+  en_US dictionary accepts (below). The suggested respelling
+  of a shape is a guess, so a shape is never in the patch.
+- **Not reported by shape:** a capitalized word; a word of the letters a-f
+  alone (hex); a word with a Latin ending (-us but not -ous, -ae, -ii, -alis,
+  -icus, -ica, -icum, -ensis), or one of `LATIN_EPITHETS`, Latin epithets whose
+  ending looks English ("faecium", "haematobium"); a word holding one of
+  `SHAPE_EXCEPTIONS`, American biology the dictionary lacks ("caecilian",
+  "paedomorphosis", "oestrid", "haemosporidian", "haemogregarine",
+  "haemonchosis", "asafoetida"); and
+  `DICTIONARY_WORDS`, whole words the en_US dictionary accepts as American
+  ("leucotomy", "pharmacopoeia" and their plurals). The verifier listed those
+  two as British; the dictionary test below and the verifier disagree, and the
+  dictionary wins until the owner decides otherwise. Their derivatives the
+  dictionary does not list ("pharmacopoeial") are reported. <!-- spelling-ok -->
+- **The binomial skip.** No word, listed or by shape, is reported when it is a
+  binomial's epithet: it is lowercase and a true Latin epithet (`epithet()`):
+  it ends in a Latin form (-a, -i, -is, -um, -us but not -ous), does not
+  end in an English medical form (`ENGLISH_FORM`: -ia, so every -aemia; -oea,
+  so every -rrhoea and -pnoea; -oma; -itis; -sis), is not one of `NOT_EPITHETS`
+  (English -um and -a nouns that look Latin:
+  caecum, haemoperitoneum, <!-- spelling-ok -->
+  haemopericardium, haematometra, <!-- spelling-ok -->
+  praecordium), and is not a listed word, <!-- spelling-ok -->
+  except foetus (`LISTED_EPITHETS`, a species epithet too); <!-- spelling-ok -->
+  and the word before it, past
+  emphasis, quotes, brackets, HTML tags and `&nbsp;`, and on the line before if
+  nothing but markup precedes it on its own (a blank line ends that), is one of
+  `GENERA` (genera with British-looking epithets: Tritrichomonas,
+  Campylobacter, Enterococcus, Schistosoma, Mycoplasma and others) or an
+  abbreviated genus: exactly one capital and a period ("T."), the capital at
+  the start of the text or directly after whitespace, "*", "_", a quote or an
+  opening bracket (so "UK." and "Fig. 2A." are none), and the word before it
+  none of `NOT_GENUS_WORDS` (Dr, Mr, Mrs, Ms, Prof, Hep, Group, Twin, Fig,
+  Figure, Bed, Lead, Vitamin, Appendix, Table, Type, Grade, Stage, Class,
+  Factor, Hepatitis, Genotype, in any case), so
+  "Twin A. foetus" is reported. <!-- spelling-ok -->
+  Word-level exceptions are listed whole in `LATIN_EPITHETS` and pass wherever
+  they stand: those with a Latin-looking ending the rules above call English
+  ("haemophilum") and the -ans, -ens and -os ones
+  ("haemolysans", <!-- spelling-ok -->
+  "oedematiens", "haemobos", "caecicola"). <!-- spelling-ok -->
+  "sulphur" is reported even as the butterfly's name, <!-- spelling-ok -->
+  since it is the British spelling of "sulfur". <!-- spelling-ok -->
+  So "Tritrichomonas foetus" and <!-- spelling-ok -->
+  "Enterococcus faecalis" pass, <!-- spelling-ok -->
+  and "Severe foetus", "Staphylococcus bacteraemia", <!-- spelling-ok -->
+  "Neisseria gonorrhoea", "Mycoplasma oesophagitis", <!-- spelling-ok -->
+  "B. oedema" and "Hepatitis C. ischaemia" are reported <!-- spelling-ok -->
+  (the verifier's seventh pass found eleven such English words skipped as
+  epithets by the first rule, which asked only for a Latin-looking ending).
+  The genus list is closed: an epithet after a genus not on it is reported,
+  and needs a marker or a new `GENERA` entry.
+- **The en_US dictionary is the guard against false reports.** The test
+  expands the en_US Hunspell dictionary (`aoo-mozilla-en-dict-us`, pinned in
+  `pixi.toml` for the test only), reads each word as the checker does (its
+  runs of letters), and demands no rule, listed or by shape, matches any of its
+  lowercase words except
+  "towards" and "whilst", <!-- spelling-ok -->
+  which CLAUDE.md rules out. The dictionary lacks most medical words, so the
+  test's own list of American look-alikes still matters.
+- **What is not prose is not reported:** a URL (with "://", or a scheme written
+  without it: mailto:, urn:, doi:, data: and a few more), an email address and
+  a git address, a domain (by a listed top-level domain), a file name with a
+  listed extension, a path (starting "./", "../" or "/", or with an extension
+  in a segment, where an abbreviation with dots such as "e.g." or "i.e." is no
+  extension, so "oedema/e.g." is read), a digest named by its <!-- spelling-ok -->
+  algorithm, and a run of 16 or more base64 characters that ends in "=" or
+  holds a digit and changes between upper case, lower case and digits at least
+  every other character on average. Hex needs no rule beyond the shape one: a
+  word is a run of letters, and no listed British word is spelled with a-f
+  alone (the tests check every one).
+- **What the patch suggests.** Only a hit for which all of these hold
+  (`left_by()`); the report names, for each other hit, the first that fails:
+  1. the word is listed, not found by its shape;
+  2. it is all lowercase (a capitalized word may be a journal, a company, a
+     place or a genus);
+  3. the file is Markdown, reStructuredText or plain text (`.md`, `.rst`,
+     `.txt`, in any case), or the hit is inside a value of `app/i18n/en.json`
+     (not a key, not an array's item);
+  4. it is not in code: a fenced (` ``` ` or `~~~`) or indented Markdown block,
+     a reStructuredText literal block (after "::") or code directive, text
+     between backticks, a line starting with "import ", "from ... import ",
+     "$ ", ">>> " or "... ", or the word after "import", "require" or
+     "library";
+  5. between it and the whitespace or line end around it stands nothing but,
+     before it, `(`, `[`, `"`, `'` or `*`, and after it, those that close, `*`,
+     or `,` `;` `:` `.` `!` `?`.
+  These are a filter for the patch only; they never suppress a report.
+- **Quotations (R-17).** R-17 says quoted material keeps its original spelling.
+  Nothing rewrites it, because nothing is rewritten automatically. The check
+  still reports a quoted British word, so a quotation in our own files still
+  needs `spelling-ok` on its line or a scoped `.spelling-allow` entry, as
+  before.
+- **Known limits.** A British word whose stem is not listed and whose shape is
+  not a rule passes ("paeony", "diaeresis", "haem" alone, and an oe- compound
+  with a consonant before the segment that is not listed;
+  `tests/fixtures/spelling_corpus/unlisted.txt` keeps examples). The patch can
+  still be wrong (a lowercase listed word inside a quotation, a name written in
+  lowercase), which is why it is a suggestion. An epithet after a genus not in
+  `GENERA`, and a name made only of listed words, are reported and need
+  `spelling-ok`. A word spelled with the letters a-f alone is hex and is not
+  read, so "caeca" passes. <!-- spelling-ok -->
+  A base64 run that is mostly long words, a URL with a scheme
+  not listed and no "://", a domain with an unlisted top-level domain and a
+  file name with an unlisted extension are read as prose; a word joined to a
+  listed top-level domain by a dot ("oedema.co") is read as a domain and not
+  reported. Commit messages are not read. "oenology" is left out on purpose:
+  American uses it too.
+- **Left out on purpose**, because they are standard or common American
+  spellings: "dialogue", "analogue" and the other -ogue words (except the
+  catalog word, which CLAUDE.md names); "burnt", "dreamt", "spelt"; "glamour";
+  "fulfilled", "enrolled" (the American past tense doubles the l); "analyses"
+  (the plural of "analysis").
+- **Words as code writes them.** The scan splits identifiers at underscores,
+  hyphens, digits and case changes, so each word of a camelCase or SHOUTING_CASE
+  name is checked (R-17 covers code), in any case. The ligatures "œ" and "æ" are
+  read as "oe" and "ae". A word with an accented letter is not English and is
+  not read at all ("décentre").
+- **Exemptions are narrow.** A `.spelling-allow` entry is `glob: phrase`: the
+  phrase is exempt, exactly and case-sensitively, only in the files the glob
+  matches, and only the phrase is blanked, so a British word elsewhere on the
+  same line is still caught. An entry with no glob is refused; `*` is the
+  explicit way to exempt a phrase everywhere, and needs a comment saying why.
+  The GitHub Actions status function and result value are exempt only in
+  `.github/workflows/*.yml`; Python's asyncio exception class and its
+  `.cancelled()` <!-- spelling-ok -->
+  method call only in `*.py`, so the word in a Python comment or docstring, or
+  as a bare call, is still caught. The `spelling-ok` marker still exempts its
+  whole line. The allowlist file itself is skipped, like the checker, and so are
+  the files directly in `tests/fixtures/spelling_corpus/`: each holds British
+  phrases on purpose.
+- **Nothing is skipped in silence.** A file that is not valid UTF-8, or cannot
+  be read, is reported as a problem, not passed.
+- **A whole-repository run reads what the hook reads.** Run with no arguments,
+  the checker reads every text file outside `SKIP_DIRS` (git and tool
+  directories, build output, caches), judged by identify's rule that
+  pre-commit's `types: [text]` uses for a file it cannot name by extension: in
+  the first 1024 bytes, no byte outside 0x20-0x7E and 0x80-0xFF but BEL, BS,
+  TAB, LF, VT, FF, CR and ESC (so no NUL, other control byte or DEL). So
+  `pixi run check-spelling` reads shell scripts, `.caddy` files, `.env.example`,
+  the ignore files and the lock file, as the hook does. Symbolic links are not
+  read (pre-commit does not pass them; the target is read on its own). On the
+  command line a file named twice (with and without `./`, through a symbolic
+  link to a directory, or by a link and its target) is read once, and a symbolic
+  link to a file stands for its target, so a patch never names one file twice
+  and always applies; a link to no file is said to be skipped and makes the
+  exit 1. The one
+  difference left: the hook reads only files git tracks, while the no-argument
+  run also reads untracked files that are not in `SKIP_DIRS`.
+- **Shown to fail:** `tests/test_check_spelling.py` checks every generated word,
+  and every word of a hand-written table, in each of the nine contexts it lists
+  (prose, a comment, a string, snake_case, kebab-case, camelCase, Title case,
+  UPPER CASE, UPPER_SNAKE). The table names every `EXPLICIT` word, a form of
+  every family stem, ending and prefix, and a form of every `MEDICAL` stem with
+  each of its own prefixes, and the test demands it does, and that the patch
+  suggests every row. It runs the verifier's corpus
+  (`tests/fixtures/spelling_corpus/`: about 1,100 lines of organisms, drugs,
+  places, journal titles, names, American words, code, URLs, hex and encoded
+  data, the line-wrapped binomial, the demonstration that the first version
+  corrupted, the 131 medical words and the 132 opener combinations): every
+  clean line produces no finding, no name is in the patch, every British line
+  is found and suggested exactly where the rules allow. It shows that `--fix`
+  changes no file's bytes or modification time, for every kind of file and the
+  whole corpus, named or found by a whole-repository run; that its patch
+  starts with the suggestion header, passes `git apply --check` on a copy and
+  makes exactly the expected text (a last line with no newline, CRLF endings,
+  a form feed inside a line, the English catalog, several files); and that a
+  hit with no suggestion is listed, not patched. `FIX_CASES` pins each patch
+  rule both ways (every boundary character, every kind of file, every kind of
+  code, the verifier's cases), and `BINOMIALS` the binomial skip. It also
+  checks each shape pattern with a word only it matches, each narrowing with
+  the American word it protects, the exceptions, the en_US dictionary, that
+  the patch honors `skip()`, capitalized words and identifiers, what is not
+  prose, `.cancelled()` <!-- spelling-ok -->
+  in and out of Python, the marker, the allowlist and its scope, unreadable
+  files, which files a run reads, `SKIP_DIRS` and `QUOTED_VERBATIM` exactly, the
+  corpus skip, and the exit codes. Then each is broken in a copy of the checker
+  (the test's `MUTATIONS`: dropped stems, endings, prefixes and `EXPLICIT`
+  words; a Latin ending or an inside-a-word match added; each shape pattern
+  dropped and each narrowing undone; each exclusion and the binomial skip
+  removed or widened; each not-prose rule removed or widened; each patch rule
+  removed, and each boundary character added or dropped; `--fix` writing a
+  file, ignoring `skip()`, losing its header, its exit code, its list of the
+  rest, the no-newline marker, git's line splitting or the file's line
+  endings, reading a file named twice twice, reading a named link rather
+  than its target or naming a path `git apply` refuses; each alternative of
+  each narrowed pattern, each exception, Latin epithet and dictionary word,
+  and each English form of the binomial skip dropped; each URL scheme and
+  top-level domain the checker lists, which the test also demands equal a
+  list written in it; and the file rules), and the test demands the break is
+  noticed.
+  A mutant stops at the first property that notices it, the fast ones first,
+  and the en_US dictionary is expanded once and handed to every mutant's
+  process, so the whole run takes about half a minute (it took ten, because
+  every mutant ran every property, the 250,000 lines of the every-word check
+  among them). The
+  tests of the removed in-place rewrite were deleted with it, not weakened.
+- **Rejected:** narrowing `--fix` further (each of five rounds narrowed it,
+  and each round's verifier found another kind of text it corrupted; a
+  rewriter that is right only where its heuristics are right is wrong somewhere
+  new each time); removing `--fix` entirely (the respellings of listed words in
+  prose are mechanical and usually right, so a patch saves real work, and a
+  person reviewing a diff catches what a heuristic cannot); a flag that
+  re-enables writing (the same corruption, one flag away); keeping the
+  after-a-capitalized-word suppression for reports (it silenced real British
+  words after every capitalized word that was not a sentence opener);
+  listing more exact forms (the failure #169 describes, repeated for the next
+  unlisted one); matching any word that contains a British stem (flags
+  "enrolled" and "fulfilled"); a dictionary as the checker's word list (a new
+  install, and still a list; the dictionary is a dependency of the test only,
+  as a guard); allowlist phrases that apply in every file (a protocol's
+  spelling in a workflow exempted the same word in our prose).
+- Source: #169; R-17; the verifier's findings on the first five versions of
+  this change; the orchestrating instruction of round six to stop writing
+  files.
+- Enforced by: `pixi run check-spelling` (pre-commit, and CI through `prek run
+  --all-files`); `pixi run test-check-spelling` (pre-commit when the checker,
+  its allowlist, its tests or its corpus change, and CI's test workflow).
+
 ### D-82 One export schema for every framework, and one fingerprint rule
 
 - Status: Proposed (implements #177; the choices below are this change's, for
@@ -2326,8 +2622,8 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
   empty for 1.1, 9.3 and 12.1 and was written for the earlier relation of 3.2,
   6.3, 7.5 and 8.1. It was left as it is rather than rewritten, because the
   page does not supply the text and none is invented here (the only edit is
-  the spelling "rigour" to "rigor" in 12.2's, under R-17). Anything that starts
-  to show it must first bring it up to date.
+  the spelling "rigour" to "rigor" in 12.2's, under R-17). <!-- spelling-ok -->
+  Anything that starts to show it must first bring it up to date.
 - **Rejected:** generating the whole page from the definition (its argument is
   prose, written by a reviewer, not data); hand-maintaining a second per-item
   table on the page (two copies, the failure #174 already was); parsing only the

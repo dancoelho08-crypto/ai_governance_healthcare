@@ -1,0 +1,6 @@
+# Python's own spelling, read as a .py file with the real .spelling-allow:
+# none may produce a finding. Lines starting with '# ' are comments.
+if task.cancelled():
+fut.cancelled()
+except asyncio.CancelledError:
+except concurrent.futures.CancelledError:

@@ -58,6 +58,10 @@ jobs:
       - run: pixi run test-check-injection
       - run: pixi run test-check-i18n
 
+      # The British-spelling guard: every listed word and its inflections caught,
+      # exemptions no wider than they say, and mutants noticed (#169).
+      - run: pixi run test-check-spelling
+
       # The checklist pages are their framework definitions, byte for byte (#168).
       - run: pixi run test-framework-docs
 

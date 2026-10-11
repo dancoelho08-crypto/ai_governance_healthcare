@@ -6,6 +6,9 @@ version = "0.1.0"
 
 [dependencies]
 python = ">=3.11,<3.13"
+# The en_US dictionary: tests/test_check_spelling.py checks no spelling rule
+# matches an American word (#169, D-81). The checker does not read it.
+aoo-mozilla-en-dict-us = "==2024.3.1"
 
 [pypi-dependencies]
 zensical = "*"
@@ -170,6 +173,9 @@ test-dockerignore = "python tests/test_dockerignore.py"
 # and reading .env the way compose does (empty means the default; " #" starts a comment).
 test-preflight = "python tests/test_preflight.py"
 check-spelling = "python scripts/check_spelling.py"
+# The spelling guard shown to fail: every word, inflection and exemption, and
+# mutation tests that break a copy of the checker (#169).
+test-check-spelling = "python tests/test_check_spelling.py"
 # Every catalog has en.json's keys, placeholders and plural forms, and no markup (#80).
 check-i18n = "python scripts/check_i18n.py"
 test-check-i18n = "python tests/test_check_i18n.py"
@@ -179,6 +185,8 @@ check-framework = "python scripts/check_framework.py"
 test-check-framework = "python tests/test_check_framework.py"
 check-chai = "python scripts/check_chai_updates.py"
 check-chai-write = "python scripts/check_chai_updates.py --write"
+# Prints a patch of suggested respellings to review and `git apply`, and lists
+# the rest to fix by hand. It never writes a file (#169, D-81).
 fix-spelling = "python scripts/check_spelling.py --fix"
 hooks-install = "prek install"
 check = "prek run --all-files"
