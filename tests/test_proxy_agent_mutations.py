@@ -39,8 +39,8 @@ STRIP = "			request_header -{name}\n"
 
 # (name, old text, new text). Each is applied inside the agent block, or to the
 # whole file where it says so; the harness refuses a mutation that changes nothing.
-SECRET_LINE = '\t\t\t\theader_up X-Proxy-Secret "{$PROXY_SHARED_SECRET}"\n'
-AFTER_SECRET = (
+HANDOFF_LINE = '\t\t\t\theader_up X-Proxy-Secret "{$PROXY_SHARED_SECRET}"\n'
+AFTER_HANDOFF = (
     "\t\t\t\ttransport http {\n\t\t\t\t\tdial_timeout 5s\n\t\t\t\t}\n"
     "\t\t\t}\n\t\t}\n\t}\n\n\thandle /api/agent/* {"
 )
@@ -108,8 +108,8 @@ MUTATIONS: list[tuple[str, str, str]] = [
     ),
     (
         "the shared secret is not sent on the agent route",
-        SECRET_LINE + AFTER_SECRET,
-        AFTER_SECRET,
+        HANDOFF_LINE + AFTER_HANDOFF,
+        AFTER_HANDOFF,
     ),
 ]
 
