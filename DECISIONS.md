@@ -2356,3 +2356,51 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
   `tests/test_check_framework.py` (`pixi run test-check-framework`) shows the
   coherence rule failing (9.1 partial with no ids, 2.2 OPTICA-only with s1-2).
   `tests/test_optica.py` (`pixi run test-app`) checks each chip in a browser.
+
+### D-85 The Markdown export is audited as rendered, worst case first
+
+- Status: Proposed (a testing choice made on #167; the owner may change it)
+- **Render the export, audit the HTML.** `tests/test_markdown_render.py` renders
+  the Markdown report with markdown-it-py, a CommonMark reference
+  implementation, in four configurations: the CommonMark preset and GFM
+  (tables, strikethrough, autolinks), each with raw HTML refused and with it
+  passed through. The passed-through ones are the worst case, a viewer with no
+  sanitizer, and are the ones that count. `md_problems` stays as a cheap
+  first look at the text.
+- **What is audited.** The tokens (no `html_block`, `html_inline`, image, hard
+  break, code, quotation or strikethrough exists); the HTML in Python (only
+  headings, paragraphs, lists, table parts, strong, em, a and hr, no `on*` or
+  style attribute, no attribute starting with `javascript:`, `data:` or
+  `vbscript:`, every link http(s) without credentials); the same HTML opened in
+  a page with the injection suite's own `AUDIT`; and the structure: the block
+  tags of an export poisoned with a payload equal those of the same project
+  poisoned with a harmless word, so a value cannot start a heading, a list, a
+  quotation or a table row.
+- **Configuration is part of the test.** linkify's email autolink is off (it
+  makes `mailto:` links, not what is audited) and its protocol-relative `//host`
+  schema is removed, because GitHub does not make either from bare text. The
+  developer-only pseudo-locale `en-XA` is left out, since it pads strings with
+  tildes the renderer reads as strikethrough; no reader chooses it.
+- **Known, and not fixed here.** A GFM renderer (GitHub's too) turns a bare
+  address in a value into a link, including `https://user:pass@host/`, because
+  `line()` escapes Markdown's structure and not an address. The audit allows a
+  credentialed link only when its text is its address, and a test pins that
+  this is what happens, so a fix (escaping the colon after a scheme) would be
+  noticed and the pin removed. It is the owner's call whether the Markdown
+  report should stop addresses from linking. Also not noticed by the
+  structure comparison: a pipe that ends a table cell early, because GFM drops
+  the excess cells and the block tags stay the same.
+- **Reproducible.** `markdown-it-py` and `linkify-it-py` are in
+  `pixi.toml`'s pypi-dependencies and locked in `pixi.lock` with hashes; nothing
+  is fetched at test time.
+- **Rejected:** keeping text patterns alone (it audits what someone thought of,
+  not what a renderer does); a JavaScript Markdown renderer in the page (D-71 already
+  rejected one); claiming `enforced` for C-82, since one
+  renderer family cannot stand for GitHub's sanitizer, an editor or a wiki.
+- Source: #167; the owner's task for it; claim C-82.
+- Enforced by: `tests/test_markdown_render.py` (`pixi run test-markdown-render`,
+  in CI's browser job and in the engines matrix): every payload of the injection
+  suite across every sample, OPTICA off and on, every language, and the example
+  build; and mutations of the built page (escaping removed, newlines kept,
+  angle brackets or a pipe unescaped, `mdInlineMarkdown` writing raw text or any
+  link) each rejected.

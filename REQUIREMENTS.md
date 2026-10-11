@@ -744,7 +744,11 @@ honest answer and is a gap worth closing; see R-19.
   one.
 - Source: the owner, on #155; DECISIONS D-67.
 - Enforced by: `tests/test_injection.py`, `tests/test_check_injection.py` with
-  `pixi run check-injection`, `server/tests/test_sql_injection.py`.
+  `pixi run check-injection`, `server/tests/test_sql_injection.py`, and
+  `tests/test_markdown_render.py`, which renders the Markdown export with
+  CommonMark and GFM renderers (raw HTML refused and passed through) and audits
+  the HTML (#167, D-85; closes the known gap that the Markdown was audited only
+  as text). It does not run GitHub's own renderer, an editor preview or a wiki.
 
 ### R-60 One self-contained file, for the deployed stack and the example page
 

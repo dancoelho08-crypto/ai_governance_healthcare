@@ -80,7 +80,10 @@ Whatever a person typed stays text in every export. In the HTML report and the P
 it is escaped, in the Markdown report it is ended at the line and has the
 characters Markdown reads as structure escaped, so a value cannot start a heading,
 become a link or an image, or add raw HTML, and in the CSV a cell a spreadsheet
-would run as a formula is neutralized.
+would run as a formula is neutralized. The test suite renders the Markdown report
+with CommonMark and GFM renderers, with raw HTML passed through as well as refused,
+and audits the HTML that comes out; it does not run GitHub's own renderer or a
+particular editor's preview.
 
 What a person types becomes formatting or a link in two places only: the [notes
 and rationale fields](guide.md#formatting-notes), which take bold, italic, lists

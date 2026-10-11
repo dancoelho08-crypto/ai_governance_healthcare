@@ -378,7 +378,10 @@ In short:
   values to SQL as parameters and never in the SQL text. `pixi run test-injection`
   poisons every string in a project and audits every screen and export,
   `pixi run check-injection` refuses new ways of turning text into markup, and a
-  server test fails on SQL built at run time.
+  server test fails on SQL built at run time. `pixi run test-markdown-render`
+  renders the Markdown export with markdown-it-py (CommonMark and GFM, raw HTML
+  refused and passed through) and audits the HTML, so the Markdown is checked
+  as a reader's renderer reads it and not only as text.
   The page-policy and injection suites run in Chromium by default; set
   `TEST_BROWSER=firefox` or `webkit` to run them in another engine (CI runs
   both, because each engine enforces the policy itself). An unknown value is an

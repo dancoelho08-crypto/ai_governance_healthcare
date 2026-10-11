@@ -231,6 +231,10 @@ jobs:
       - name: injection
         if: ${{ !cancelled() }}
         run: pixi run test-injection
+      # The Markdown report rendered by CommonMark renderers, the HTML audited (#167).
+      - name: the Markdown report, rendered, is still only text
+        if: ${{ !cancelled() }}
+        run: pixi run test-markdown-render
 
       # Governance metadata only, never patient data, in any mode, stated where a
       # deployer reads first (#34). The in-app notice is in test-boot.
@@ -434,6 +438,9 @@ jobs:
       - name: poisoned text stays text in this engine
         if: ${{ !cancelled() }}
         run: pixi run test-injection
+      - name: the rendered Markdown report is audited in this engine
+        if: ${{ !cancelled() }}
+        run: pixi run test-markdown-render
 
   # One check that means "everything passed", so branch protection can require a
   # single name and a new job cannot be forgotten. `skipped` counts as a failure:

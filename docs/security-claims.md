@@ -1068,9 +1068,21 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
 - **Asserted in:** `docs/exports.md` — "Whatever a person typed stays text in every export."
 - **Status:** partial
 - **Gap:** Escaping is the first barrier, and the page's own policy is the second (C-84),
-  and both are tested in Chromium, Firefox and WebKit. The Markdown report is checked
-  as text, not as a Markdown renderer turns it into HTML. #167
+  and both are tested in Chromium, Firefox and WebKit. The Markdown report is now also
+  rendered by markdown-it-py, a CommonMark reference implementation, as CommonMark and
+  as GFM, each with raw HTML refused and with it passed through (the worst case, no
+  sanitizer), and the HTML audited (#167, D-85). What that does not cover is every
+  other reader: GitHub's own renderer and sanitizer, an editor preview and a wiki are
+  not run, and syntax only some of them add (an @mention, a #reference, `$` math, an
+  emoji code, a footnote, an email autolink, a wiki's own markup) is not audited. A
+  GFM renderer also links a bare address a person typed, including one with
+  credentials (`https://user:pass@host/`), and the export does not stop it: the link's
+  text is its address, and the audit reports it apart from a link with other text.
+  A claim about every renderer cannot be proven with one, so this stays partial.
 - **Enforced by:**
+  `tests/test_markdown_render.py::every payload, sample and language renders as text in every configuration`
+  `tests/test_markdown_render.py::the example build's poisoned definition and records render as text`
+  `tests/test_markdown_render.py::every weakened export is rejected`
   `tests/test_injection.py::an app that does not escape is rejected`
   `tests/test_injection.py::the CSV rule notices a formula cell`
   `tests/test_injection.py::the Markdown rules notice a heading, a script link and raw HTML`
