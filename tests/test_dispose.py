@@ -149,6 +149,12 @@ INSERT INTO access_event (at, actor, action, project_id) VALUES
 INSERT INTO principals (id, name, email, last_seen) VALUES
   ('left@h.org', 'Left Long Ago', 'left@h.org', now() - interval '8 years'),
   ('here@h.org', 'Still Here', 'here@h.org', now());
+INSERT INTO agent_token (token_id, secret_hash, principal_id, created_at, expires_at)
+VALUES
+  ('aaaaaaaaaaaaaaaa', repeat('a', 64), 'left@h.org',
+   now() - interval '8 years', now() - interval '8 years' + interval '8 hours'),
+  ('bbbbbbbbbbbbbbbb', repeat('b', 64), 'here@h.org', now(),
+   now() + interval '8 hours');
 """
 
 
@@ -227,6 +233,12 @@ def integration() -> None:
         )
         people = tpl.psql(name, "SELECT string_agg(id, ',') FROM principals")
         check("someone still signing in is kept", people == "here@h.org", people)
+        tokens = tpl.psql(name, "SELECT string_agg(token_id, ',') FROM agent_token")
+        check(
+            "a disposed person's agent tokens go with them, and a kept person's stay",
+            tokens == "bbbbbbbbbbbbbbbb",
+            tokens,
+        )
         code, out = run("--psql", prefix)
         check(
             "a second report finds nothing due",

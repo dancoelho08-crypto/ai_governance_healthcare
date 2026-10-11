@@ -58,6 +58,7 @@ settings: an empty or placeholder password, a literal identity such as
 | `make backup`, `make verify-backup`, `make restore` | Encrypted dumps, a restore test into a throwaway database, and a guarded restore. See [Backups](#backups-make-backup-is-a-tool-not-a-backup-strategy) |
 | `make reapply-purges` | Re-applies erasures after a restore ([Privacy and retention](privacy.md#a-restore-brings-purged-content-back)) |
 | `make dispose` | Reports records past their retention period; `APPLY=1 BY=<name>` disposes of them ([Privacy and retention](privacy.md#disposal-at-the-end-of-the-period)) |
+| `make agent-tokens` | Lists agent tokens, or revokes them: `REVOKE=1 TOKEN=<id>`, `WHO=<user>` or `ALL=1` ([The agent API](agent-api.md#revoking-tokens)) |
 | `make subject-access WHO=<id>` | Finds every place one person's identifier is stored |
 | `make phi-scan` | Looks for pasted patient identifiers, without ever printing them |
 | `make psql`, `make shell` | A database prompt, and a shell in the API container |
@@ -287,6 +288,22 @@ to verify a signed assertion itself — the IAP JWT, `x-amzn-oidc-data`,
     `compose.dev.yaml` deliberately breaks this by publishing the API on
     `127.0.0.1:8000`. That is why it is a named override rather than
     `compose.override.yaml`, which `docker compose up` would pick up silently.
+
+#### The one route that skips the sign-on
+
+The read-only agent API ([The agent API](agent-api.md)) is **off** until
+`AGENT_ID_SECRET` is set. With it set, an agent that holds a token a person minted
+reaches three `GET` routes under `/api/agent/` with no single sign-on session. The
+Caddyfile gives that path its own block: it forwards exactly those three routes,
+deletes the identity header names it knows (a fixed list of sixteen) as defense
+in
+depth and sets none, and answers any other method or path under the prefix with
+a
+404. The API itself reads no identity header on these routes. Every other route
+     is
+as described above. If a front door of yours sits in front of Caddy and
+authenticates every path, it has to let `/api/agent/` through, or the agent API
+cannot be used; the page says how, per front door, and says where it cannot be done.
 
 ### How the containers are locked down
 

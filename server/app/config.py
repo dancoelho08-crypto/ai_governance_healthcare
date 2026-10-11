@@ -164,6 +164,42 @@ def _idle_lock_minutes() -> int:
     return int(raw)
 
 
+# The secret that makes the agent API's person and project ids opaque (#164). It is a
+# key, not a password a person types, so a short or patterned one is refused rather
+# than accepted. `openssl rand -hex 32` (64 characters, 16 symbols) passes.
+AGENT_ID_SECRET_MIN_LENGTH = 32
+AGENT_ID_SECRET_MIN_DISTINCT = 10
+AGENT_ID_SECRET_MAX_PERIOD = 16
+
+# What a status or decision filter on the agent API may look like, so that a query
+# parameter is a vocabulary word and not a place to put text.
+AGENT_VALUE_SHAPE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ,&/+._-]{0,63}$")
+
+
+def _weak_secret(value: str) -> str | None:
+    """Why a secret is too weak to key a pseudonym, or None."""
+    if len(value) < AGENT_ID_SECRET_MIN_LENGTH:
+        return f"shorter than {AGENT_ID_SECRET_MIN_LENGTH} characters"
+    if len(set(value)) < AGENT_ID_SECRET_MIN_DISTINCT:
+        return f"fewer than {AGENT_ID_SECRET_MIN_DISTINCT} different characters"
+    for period in range(1, AGENT_ID_SECRET_MAX_PERIOD + 1):
+        if value == (value[:period] * len(value))[: len(value)]:
+            return f"one pattern of {period} character(s) repeated"
+    return None
+
+
+def _agent_id_secret() -> str:
+    value = os.environ.get("AGENT_ID_SECRET", "").strip()
+    problem = _weak_secret(value) if value else None
+    if problem:
+        raise RuntimeError(
+            f"AGENT_ID_SECRET is set but {problem}. It keys the pseudonym of every "
+            "person and project the agent API names, so it must be long and random: "
+            "openssl rand -hex 32. Unset it to leave the agent API off."
+        )
+    return value
+
+
 def _csv(name: str) -> list[str]:
     return [part.strip() for part in _str(name).split(",") if part.strip()]
 
@@ -358,9 +394,35 @@ class Settings:
     # is validated (see SIGN_OUT_RULES): https, or a path on this origin.
     sign_out_url: str = ""
 
+    # --- agent API (#164, D-89) -------------------------------------------
+    # The key that turns an identity id into the opaque id an agent is shown. Empty
+    # leaves the agent API off: no token can be minted and every /api/agent/ route
+    # answers 404. It is never logged and never returned.
+    agent_id_secret: str = ""
+    # Requests per token per rate-limit window. Lower than rate_limit_max_requests,
+    # which a person at a dashboard needs and an agent loop does not.
+    agent_rate_limit_max_requests: int = 60
+    # Failed agent calls one source may make per window before the rest are answered
+    # 429 with nothing written. Successful calls are never counted against a source.
+    agent_failure_rate_limit_max_requests: int = 30
+    # Failed agent calls all sources together may make per window; past it a failure
+    # is answered 429 with no per-source accounting, so that rotating source keys
+    # cannot make the server do unbounded work.
+    agent_global_failure_rate_limit_max_requests: int = 600
+    # Calls per window all of one person's tokens share, so five tokens do not
+    # multiply the work a person's calls cost.
+    agent_user_rate_limit_max_requests: int = 120
+    # Tokens a person may hold at once (not revoked, not expired).
+    agent_max_active_tokens: int = 5
+
     # --- misc -------------------------------------------------------------
     version: str = "0.1.0"
     log_page_size: int = 60
+
+    @property
+    def agent_api_enabled(self) -> bool:
+        """The agent API is on only when it has a secret to make ids opaque with."""
+        return bool(self.agent_id_secret)
 
     @property
     def serving_database_url(self) -> str:
@@ -554,6 +616,18 @@ class Settings:
             sse_max_lifetime_seconds=float(_int("SSE_MAX_LIFETIME_SECONDS", 900)),
             idle_lock_minutes=_idle_lock_minutes(),
             sign_out_url=_sign_out_url(),
+            agent_id_secret=_agent_id_secret(),
+            agent_rate_limit_max_requests=_int("AGENT_RATE_LIMIT_MAX_REQUESTS", 60),
+            agent_failure_rate_limit_max_requests=_int(
+                "AGENT_FAILURE_RATE_LIMIT_MAX_REQUESTS", 30
+            ),
+            agent_global_failure_rate_limit_max_requests=_int(
+                "AGENT_GLOBAL_FAILURE_RATE_LIMIT_MAX_REQUESTS", 600
+            ),
+            agent_user_rate_limit_max_requests=_int(
+                "AGENT_USER_RATE_LIMIT_MAX_REQUESTS", 120
+            ),
+            agent_max_active_tokens=_int("AGENT_MAX_ACTIVE_TOKENS", 5),
             version=_str("APP_VERSION", "0.1.0"),
             log_page_size=_int("LOG_PAGE_SIZE", 60),
         )

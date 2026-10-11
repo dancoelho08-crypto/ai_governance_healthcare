@@ -531,6 +531,163 @@ def main() -> int:
         rows,
     )
 
+    print("Agent API (#164)")
+    status, body = http("/api/agent-tokens", "POST", {"label": "stack test"})
+    if status == 404 and not REQUIRE_TESTS:
+        print("  skip  AGENT_ID_SECRET is not set in this stack: the agent API is off")
+    else:
+        check("a signed-in user mints a token through the proxy", status == 201, body)
+        minted = json.loads(body) if status == 201 else {"token": "", "id": ""}
+
+        def as_agent(
+            path: str, token: str | None, method: str = "GET"
+        ) -> tuple[int, str]:
+            headers = {"Authorization": f"Bearer {token}"} if token else {}
+            req = urllib.request.Request(
+                BASE + path, method=method, headers=headers, data=None
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    return r.status, r.read().decode()
+            except urllib.error.HTTPError as e:
+                return e.code, e.read().decode()
+
+        status, body = as_agent("/api/agent/me", minted["token"])
+        me = json.loads(body) if status == 200 else {}
+        check(
+            "the token reaches the agent route through the proxy, and names its user "
+            "only as an opaque id",
+            status == 200
+            and me.get("token_id") == minted["id"]
+            and me.get("user", "").startswith("u_")
+            and baseline["email"] not in body
+            and baseline["id"] not in body,
+            f"{status} {body}",
+        )
+        status, body = as_agent("/api/agent/portfolio?limit=5", minted["token"])
+        check(
+            "the portfolio answers, with stored fields",
+            status == 200 and "projects" in json.loads(body),
+            f"{status} {body[:200]}",
+        )
+        bad_status, bad_body = as_agent(
+            "/api/agent/me", "agt_" + "0" * 16 + "." + "A" * 43
+        )
+        check(
+            "a token that is wrong is the uniform 401",
+            bad_status == 401 and "Invalid or expired token." in bad_body,
+            f"{bad_status} {bad_body}",
+        )
+        check(
+            "a write verb on the agent route is refused by the proxy",
+            as_agent("/api/agent/me", minted["token"], "DELETE")[0] == 404,
+        )
+        rows = subprocess.run(
+            [
+                "docker",
+                "compose",
+                "exec",
+                "-T",
+                "db",
+                "psql",
+                "-U",
+                "chai",
+                "-d",
+                "chai",
+                "-tAF",
+                "|",
+                "-c",
+                "SELECT action, via, count(*) FROM access_event "
+                f"WHERE token_id = '{minted['id']}' GROUP BY 1, 2",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        ).stdout
+        counts = {
+            line.split("|")[0]: (line.split("|")[1], int(line.split("|")[2]))
+            for line in rows.split()
+            if line.count("|") == 2
+        }
+        check(
+            "each call is in the real read trail, marked as agent access",
+            counts.get("agent_me") == ("agent", 1)
+            and counts.get("agent_portfolio") == ("agent", 1),
+            rows,
+        )
+        secret = minted["token"].split(".", 1)[-1]
+        logs = subprocess.run(
+            ["docker", "compose", "logs", "--no-color", "--no-log-prefix", "api"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        ).stdout
+        check(
+            "the token's secret is in no log line",
+            bool(secret) and secret not in logs,
+        )
+        check(
+            "the owner can revoke it, and it stops working",
+            http(f"/api/agent-tokens/{minted['id']}", "DELETE")[0] == 204
+            and as_agent("/api/agent/me", minted["token"])[0] == 401,
+        )
+
+        status, body = http("/api/agent-tokens", "POST", {"label": "stack flood"})
+        survivor = json.loads(body)["token"] if status == 201 else ""
+        # A flood of well-formed wrong tokens through the real proxy, each claiming a
+        # different X-Real-IP: the proxy replaces that header, so they are one source.
+        # They are answered 401 and then 429, write no read-trail row, and a working
+        # token from the same address is still served (#164 review).
+        statuses = []
+        for i in range(300):
+            req = urllib.request.Request(
+                BASE + "/api/agent/me",
+                headers={
+                    "Authorization": f"Bearer agt_{i:016x}." + "A" * 43,
+                    "X-Real-IP": f"203.0.113.{i % 250}",
+                },
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    statuses.append(r.status)
+            except urllib.error.HTTPError as e:
+                statuses.append(e.code)
+        check(
+            "a flood of wrong tokens gets 401 then 429, whatever X-Real-IP says",
+            statuses.count(401) <= 31 and statuses.count(429) >= 250,
+            f"401x{statuses.count(401)} 429x{statuses.count(429)}",
+        )
+        check(
+            "and a working token from the same source is still served",
+            as_agent("/api/agent/me", survivor)[0] == 200,
+        )
+        written = subprocess.run(
+            [
+                "docker",
+                "compose",
+                "exec",
+                "-T",
+                "db",
+                "psql",
+                "-U",
+                "chai",
+                "-d",
+                "chai",
+                "-tA",
+                "-c",
+                "SELECT count(*) FROM access_event WHERE action = 'agent_refused' "
+                f"AND token_id <> '{minted['id']}'",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        ).stdout.strip()
+        check(
+            "and the flood wrote no row to the read trail",
+            written == "0",
+            written,
+        )
+
     print("Security events (#38)")
     # The earlier checks created, purged and deleted projects through the real proxy.
     # What the API container wrote about that is what a log sink would receive.

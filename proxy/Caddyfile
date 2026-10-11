@@ -26,10 +26,11 @@
 # WHAT THIS FILE GUARANTEES
 #
 #   Every request that reaches the API has had any client-supplied identity
-#   header stripped and replaced with one this proxy chose. That guarantee is
-#   worth exactly as much as the network rule that the API has no other way in
-#   -- see the `networks:` comments in compose.yaml. A reachable API makes this
-#   file decorative.
+#   header stripped, and on every route but the agent API's (below) replaced
+#   with one this proxy chose; on the agent routes none is set at all. That
+#   guarantee is worth exactly as much as the network rule that the API has no
+#   other way in -- see the `networks:` comments in compose.yaml. A reachable
+#   API makes this file decorative.
 # =============================================================================
 {
 	# No admin API: it is an unauthenticated config-write endpoint on :2019 and
@@ -52,7 +53,30 @@
 {$SITE_ADDRESS:http://:80} {
 	log {
 		output stdout
-		format console
+		# Keep a token out of the log (#164). The token is read from the Authorization
+		# header only, and Caddy already redacts that header's value (and Cookie's) in
+		# its log. A client that puts a token in a URL query anyway would have it written
+		# here, so the query string is dropped from the logged URI whenever the URI is, or
+		# might be, an agent route. Caddy routes on the decoded, cleaned path while the
+		# log holds the raw request target, so "might be" is any of: the word "agent" in
+		# it (any case), a percent-encoded character before the "?" (/api/%61gent/...),
+		# an absolute-form target (http://host/..., which has a "//"), or an empty or dot
+		# path segment
+		# (//api/agent, /api/./agent). Over-redacting is fine; an ordinary route's query
+		# is still logged. The first group is the part before the "?", whichever branch
+		# matched. What this cannot cover: a token in a URL PATH, which is the client's
+		# mistake, and a request header with another name than the list below.
+		format filter {
+			wrap console
+			fields {
+				request>uri regexp "(?i)^(?:([^?]*(?:agent|%|//|/\.{1,2}(?:/|$))[^?]*)\?.*|([^?]*)\?.*agent.*)$" "$1$2?[redacted]"
+				request>headers>X-Api-Key replace REDACTED
+				request>headers>Api-Key replace REDACTED
+				request>headers>X-Auth-Token replace REDACTED
+				request>headers>X-Authorization replace REDACTED
+				request>headers>X-Access-Token replace REDACTED
+			}
+		}
 	}
 
 	encode zstd gzip
@@ -108,6 +132,80 @@
 	# 401 to every request. The only identity setting that worked was a literal
 	# string -- the one configuration that makes every visitor the same person.
 	# -------------------------------------------------------------------------
+	# -------------------------------------------------------------------------
+	# The agent API (#164): read-only GET routes that answer to a bearer token,
+	# not to a signed-in session. An agent has no SSO session, so this is the one
+	# place a request reaches the API without the identity handoff below.
+	#
+	# It is safe because of what this block does NOT do: it never sets an identity
+	# header. Everything that could be taken for one is STRIPPED, so a client that
+	# forges X-Auth-Request-Email here gives the API nothing, and a request that
+	# this block forwards by mistake to a non-agent route reaches the API with no
+	# identity and gets a 401. The API, for its part, ignores identity headers on
+	# these routes and accepts a token on no other route.
+	#
+	# Handles are mutually exclusive and run in the order written, so this one
+	# stays above `handle /api/*`. Anything under /api/agent/ that is not one of the
+	# three GET routes is answered here with a 404 and goes no further: not a
+	# POST, not a DELETE, not a path the API does not serve. (/api/agent-tokens,
+	# which mints and revokes, is NOT under /api/agent/ and goes through the
+	# single sign-on handle below, as a person's session.)
+	#
+	# The operator must also let this path through a front door that authenticates
+	# every request: docs/agent-api.md says how, per front door. This file cannot.
+	# -------------------------------------------------------------------------
+	@agentread {
+		method GET
+		path /api/agent/me /api/agent/portfolio /api/agent/projects/*
+	}
+	handle @agentread {
+		request_body {
+			max_size 16KB
+		}
+
+		route {
+			# STRIP every header the API, or a front door in front of this proxy,
+			# could read as "who is this". The same list as the single sign-on
+			# handle strips after it sets, here without the set.
+			request_header -X-Auth-Request-User
+			request_header -X-Auth-Request-Name
+			request_header -X-Auth-Request-Email
+			request_header -X-Goog-Authenticated-User-Email
+			request_header -X-Goog-Authenticated-User-Id
+			request_header -X-Goog-Iap-Jwt-Assertion
+			request_header -X-Amzn-Oidc-Identity
+			request_header -X-Amzn-Oidc-Data
+			request_header -X-Amzn-Oidc-Accesstoken
+			request_header -X-Ms-Client-Principal
+			request_header -X-Ms-Client-Principal-Id
+			request_header -X-Ms-Client-Principal-Name
+			request_header -X-Ms-Client-Principal-Idp
+			request_header -X-Forwarded-Email
+			request_header -X-Forwarded-User
+			request_header -X-Forwarded-Preferred-Username
+
+			# The token is a credential in a response's request: never cache the answer.
+			header Cache-Control "no-store"
+
+			reverse_proxy api:8000 {
+				flush_interval -1
+				# The agent's own source address, for the read trail and the
+				# per-source limit. The API sets nothing on it.
+				header_up X-Real-IP {remote_host}
+				# The same shared secret as every route: the second lock the API
+				# checks (PROXY_SHARED_SECRET) still applies here.
+				header_up X-Proxy-Secret "{$PROXY_SHARED_SECRET}"
+				transport http {
+					dial_timeout 5s
+				}
+			}
+		}
+	}
+
+	handle /api/agent/* {
+		respond "Not found." 404
+	}
+
 	handle /api/* {
 		# A project document is a governance record: kilobytes. Nothing
 		# legitimate posts megabytes, and without a cap an authenticated user

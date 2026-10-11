@@ -40,6 +40,11 @@ rather than a substitute for closing the port:
 Identity is never read from the request body, a query parameter, or a cookie.
 The audit log's ``by`` field is overwritten with the proxy identity on write
 for the same reason.
+
+One family of routes does not use any of this: the read-only agent API under
+``/api/agent/`` answers to a per-user bearer token and ignores the identity header
+(``app/agent.py``, #164). Nothing in this module reads a token, and no route that
+asks for an :class:`Identity` accepts one.
 """
 
 from __future__ import annotations
@@ -65,6 +70,8 @@ __all__ = [
     "ANONYMOUS",
     "DEV_BANNER",
     "Identity",
+    "check_network_locks",
+    "client_address",
     "identity_from_request",
     "log_auth_posture",
 ]
@@ -147,12 +154,46 @@ def log_auth_posture(settings: Settings) -> None:
 
 def _networks(cidrs: list[str]) -> list[ipaddress._BaseNetwork]:
     nets = []
-    for cidr in cidrs:
+    for n, cidr in enumerate(cidrs, start=1):
         try:
             nets.append(ipaddress.ip_network(cidr, strict=False))
         except ValueError:
-            log.error("ignoring unparseable TRUSTED_PROXY_CIDR entry %r", cidr)
+            # By position, not value: the entry is operator configuration that
+            # travels with the settings object, which also holds secrets.
+            log.error(
+                "ignoring unparseable TRUSTED_PROXY_CIDR entry %d of %d", n, len(cidrs)
+            )
     return nets
+
+
+def client_address(request: Request, settings: Settings) -> str:
+    """Who the rate limiter should count a request against: the socket peer.
+
+    ``X-Real-IP`` is a header, so a client that reaches the API directly chooses it.
+    It is believed only when ``TRUSTED_PROXY_CIDR`` is set and the peer is inside it,
+    that is, when the peer is the proxy that wrote it. Otherwise (no range set) every
+    caller behind the proxy shares the proxy's address, which limits them together
+    but cannot be rotated by a client.
+
+    The result is always a parsed IP address, or the literal ``unknown``: it becomes
+    a bucket key and a log field, so it is never text a client chose. (uvicorn's own
+    ``--proxy-headers`` would let a loopback peer set the peer address from
+    ``X-Forwarded-For``; the image starts it with ``--no-proxy-headers``.)
+    """
+    peer = request.client.host if request.client else ""
+    try:
+        ip = ipaddress.ip_address(peer)
+    except ValueError:
+        return "unknown"
+    if not settings.trusted_proxy_cidrs:
+        return str(ip)
+    if not any(ip in net for net in _networks(settings.trusted_proxy_cidrs)):
+        return str(ip)
+    reported = (request.headers.get("x-real-ip") or "").strip()
+    try:
+        return str(ipaddress.ip_address(reported))
+    except ValueError:
+        return str(ip)
 
 
 def _check_peer(request: Request, settings: Settings) -> None:
@@ -352,6 +393,17 @@ def _identity_from_plain(raw: str, request: Request, settings: Settings) -> Iden
     return Identity(id=user_id or email, name=name or email, email=email)
 
 
+def check_network_locks(request: Request, settings: Settings) -> None:
+    """The two second locks, ``TRUSTED_PROXY_CIDR`` then ``PROXY_SHARED_SECRET``.
+
+    Raises 403. The agent routes (#164) answer to a bearer token and not to an
+    identity header, but they sit behind the same proxy and must not be reachable
+    around it either, so they take the same two locks.
+    """
+    _check_peer(request, settings)
+    _check_shared_secret(request, settings)
+
+
 def identity_from_request(request: Request, settings: Settings) -> Identity:
     """Build an :class:`Identity`, or raise 401 / 403.
 
@@ -365,8 +417,7 @@ def identity_from_request(request: Request, settings: Settings) -> Identity:
     # it also switched off TRUSTED_PROXY_CIDR and PROXY_SHARED_SECRET, the two
     # things documented as defense in depth for exactly this situation. A dev
     # flag should weaken one layer, not all three.
-    _check_peer(request, settings)
-    _check_shared_secret(request, settings)
+    check_network_locks(request, settings)
 
     if settings.dev_insecure_auth:
         return Identity(

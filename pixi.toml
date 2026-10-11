@@ -167,6 +167,10 @@ test-phi-scan = "python tests/test_phi_scan.py"
 test-purge-ledger = "python tests/test_purge_ledger.py"
 # make dispose: reports what is past its retention period and disposes of it (#57).
 test-dispose = "python tests/test_dispose.py"
+# make agent-tokens: the operator lists and revokes agent tokens, on a real PostgreSQL (#164). Needs Docker.
+test-agent-tokens = "python tests/test_agent_tokens.py"
+# The agent API's route in proxy/Caddyfile, each guard broken in a copy and noticed, on a real Caddy (#164). Needs Docker.
+test-proxy-agent = "python tests/test_proxy_agent_mutations.py"
 # The litigation hold on the setup page: an owner places and lifts it, with a reason (#57).
 test-holds-ui = "python tests/test_holds_ui.py"
 # What a `docker build` sends to the daemon: no .env, backups, .git or licensed PDF (#63).

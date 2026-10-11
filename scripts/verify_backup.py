@@ -53,6 +53,7 @@ REPORTED_TABLES = (
     "project_deletion",
     "principals",
     "access_event",
+    "agent_token",
     "retirement_rule",
     "retirement_rule_change",
 )

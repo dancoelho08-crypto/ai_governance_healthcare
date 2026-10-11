@@ -43,6 +43,7 @@ from .retirement import (
     describe_sync,
     load_manifest,
     sync_rules,
+    sync_vocabulary,
 )
 from .roles import DEFAULT_APP_ROLE, check_role_name, grant_statements, provision
 from .securitylog import configure_logging
@@ -92,6 +93,9 @@ async def run(env: dict[str, str]) -> int:
                 print(f"migrate: retirement rules refused: {exc}", file=sys.stderr)
                 return EXIT_REFUSED
         print(f"migrate: {describe_sync(synced, manifest)}")
+        async with db.acquire() as conn:
+            words = await sync_vocabulary(conn, manifest)
+        print(f"migrate: {words} agent vocabulary row(s) loaded (D-89)")
         if not password:
             print(
                 "migrate: APP_POSTGRES_PASSWORD is not set, so no restricted serving "

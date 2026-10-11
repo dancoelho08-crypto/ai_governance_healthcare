@@ -36,6 +36,18 @@ class AccessAction(StrEnum):
     READ_LOG = "read_log"  # a project's audit log
     EXPORT = "export"  # the dashboard reports it produced a download
     STREAM_ATTACH = "stream_attach"  # an event stream opened
+    # The read-only agent API (#164, D-89). Each is a call made with a bearer token.
+    AGENT_ME = "agent_me"  # GET /api/agent/me
+    AGENT_PORTFOLIO = "agent_portfolio"  # GET /api/agent/portfolio: the ids returned
+    AGENT_PROJECT = "agent_project"  # GET /api/agent/projects/{id}
+    AGENT_REFUSED = "agent_refused"  # a call that was refused: a bad token, no project
+
+
+class AccessVia(StrEnum):
+    """How a read arrived, as ``access_event.via`` records it (013)."""
+
+    SESSION = "session"  # the front door's identity header
+    AGENT = "agent"  # a bearer token on /api/agent/ (#164)
 
 
 class ExportFormat(StrEnum):
@@ -64,6 +76,7 @@ def source_of(request: Request) -> str:
 _EVENT_FOR: dict[AccessAction, SecurityEvent] = {
     AccessAction.EXPORT: SecurityEvent.RECORD_EXPORTED,
     AccessAction.STREAM_ATTACH: SecurityEvent.STREAM_ATTACHED,
+    AccessAction.AGENT_REFUSED: SecurityEvent.AGENT_REFUSED,
 }
 
 
@@ -76,15 +89,21 @@ async def record_access(
     project_id: str | None = None,
     revision: int | None = None,
     detail: dict[str, Any] | None = None,
+    via: AccessVia = AccessVia.SESSION,
+    token_id: str | None = None,
 ) -> None:
-    """Record one access. Raises if it cannot, which fails the read it belongs to."""
+    """Record one access. Raises if it cannot, which fails the read it belongs to.
+
+    ``via`` marks an agent call (#164) and ``token_id`` carries the token's public id,
+    never its secret.
+    """
     source = source_of(request)
     detail = detail or {}
     await conn.execute(
         """
         INSERT INTO access_event
-               (actor, action, project_id, revision, source_ip, detail)
-        VALUES ($1, $2, $3, $4, $5, $6)
+               (actor, action, project_id, revision, source_ip, detail, via, token_id)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         """,
         identity.id,
         action.value,
@@ -92,6 +111,8 @@ async def record_access(
         revision,
         source,
         detail,
+        via.value,
+        token_id,
     )
     fields: dict[str, Any] = {
         "actor": identity.id,
@@ -99,7 +120,10 @@ async def record_access(
         "project": project_id,
         "revision": revision,
         "source_ip": source,
+        "via": via.value,
     }
+    if token_id:
+        fields["token_id"] = token_id
     fields.update({k: v for k, v in detail.items() if k not in fields})
     emit(
         _EVENT_FOR.get(action, SecurityEvent.RECORD_READ),

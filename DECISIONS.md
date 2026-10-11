@@ -2845,7 +2845,220 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
   clean and tell, which does not lose what the person typed and does not block
   them); hoisting a regex constant per field (the funnel is `edit()`); stripping
   `user:pass@host` with no scheme (false positives, no link to prevent).
-- Source: #194; the owner's decision on it; DECISIONS D-85; claims C-82, C-112.
+- Source: #194; the owner's decision on it; DECISIONS D-85; claims C-82, C-118.
 - Enforced by: `tests/test_address_credentials.py` (`pixi run
   test-address-credentials`, in CI's browser job) and `tests/test_markdown_render.py`
   (any credentialed link fails the audit; mutations of the backstop are rejected).
+
+### D-89 Agents read through per-user tokens the app mints
+
+- Status: Accepted for the owner's decisions 1 to 4 and 5 on #164 (2026-10-10);
+  the defaults listed below are Proposed, for the owner to confirm
+- **The question.** An agent has no browser session, so it cannot come through the
+  front door's single sign-on, and R-06 says the API reads identity from the proxy
+  header and nothing else. #164 asks for a way for a program to read the registered
+  statuses on a person's behalf. Two options were on the table: (a) the app mints
+  per-user bearer tokens, or (b) the front door authenticates the agent and the
+  app
+  keeps trusting its header.
+- **Decided (owner, 2026-10-10).**
+    1. **Option (a).** Per-user bearer tokens, minted by the app.
+    2. **Lifetime and control.** 8 hours, fixed. The user mints their own, any role.
+       An admin can revoke. A token dies with its user.
+    3. **What the API returns.** Stored fields only: statuses, decisions, dates
+       and
+       the overdue comparison. No computed phase, flags or status colors. No free
+       text in v1. People as opaque ids, never names or emails.
+    4. **What an agent sees.** Only the projects the user's own dashboard shows.
+       Nothing archived. No emergency access, ever.
+    5. **Defaults.** No write tools or endpoints. Every agent call in the read trail,
+       marked as agent access. A separate, lower rate limit. Answers carry who and
+       when, never verdicts. The MCP service is PR 3: separate, optional, off by
+       default. The docs name no client or model.
+- **How it is built.**
+    - Routes. `/api/agent/me`, `/api/agent/portfolio` and
+      `/api/agent/projects/{ref}`: GET only, and the only routes that read a token.
+      The routes that mint, list and revoke (`/api/agent-tokens`) take the session
+      identity and never a token, so a stolen token cannot extend itself. The prefix
+      is `/api/agent/` exactly, so `/api/agent-tokens` is not under it. The
+      token is
+      read from the Authorization header and nowhere else.
+    - Token. `agt_<16 hex id>.<43 chars of url-safe base64>`: 256 random bits. The
+      id is public (the row, the log, the limiter's key); only SHA-256 of the whole
+      token is stored, compared with `hmac.compare_digest`; shown once. A CHECK
+      in
+      migration 013 fixes the lifetime at 8 hours, a trigger lets only `last_used_at`
+      and a one-time `revoked_at` change, and `principal_id` is a foreign key with
+      `ON DELETE CASCADE`.
+    - Identity on the route. The identity header is not read, so a request carrying
+      both is a bearer request. The network locks (`TRUSTED_PROXY_CIDR`,
+      `PROXY_SHARED_SECRET`) still apply.
+    - Visibility. `access.readable_rows()` is the one list: `GET /api/projects`
+      and
+      the agent API both call it, so they cannot drift; the agent adds "not
+      archived", and never passes `emergency`.
+    - Allowlist. A new pydantic model per response, filled field by field from named
+      stored keys. A record is opaque JSON the browser owns, so its keys and values
+      are whatever a writer typed (a project id, an item key, a checkpoint key
+      and a
+      supplement key can each be a sentence about a patient), and no pattern
+      tells a
+      name from an id. So a key or a value is returned only if it is a word of the
+      framework definitions of the build: the item ids, checkpoint ids, status
+      values, checkpoint options and supplement ids. The server image is
+      framework-neutral (D-76), so the words travel the way the retirement rules
+      do:
+      `scripts/build_manifest.py` writes them into `manifest.json` (a `vocab` of
+      four
+      lists per framework), the migrate job (and an API with `RUN_MIGRATIONS=true`
+      and a manifest) loads them into `agent_vocabulary` (migration 014), replacing
+      the rows wholesale on every run, and the API checks each against the framework
+      the record follows. Unlike the retirement rules this needs no acknowledgment
+      and keeps no history: the words decide only what an agent may see and nothing
+      about disposal, so a wrong load shows an agent less or more, never changes
+      when
+      a record is destroyed; the manifest is trusted build output with the authority
+      of the definitions it is built from, and the loader is a shape and safety
+      filter
+      (no invisible, control or surrogate characters, 64 characters, 5,000 words
+      a
+      kind, no repeated JSON key) and not a judgment of content, so a poisoned
+      manifest could put text in front of agents; they are outside the rule-set
+      hash, and the API
+      role may
+      only read the table. A manifest with no words empties it, and an agent is
+      shown
+      no item or checkpoint. A project id is chosen by the client and can be
+      anything, so it is returned as a reference (below), and dates must be real
+      ISO
+      dates. This replaces the hand-kept `ItemStatus`, `GateDecision` and
+      `AGENT_EXTRA_VALUES`: a build of another framework carries its own words
+      in its
+      own manifest (D-79), so there is nothing left to list by hand.
+    - Opaque ids. A person is `u_` and the first 128 bits of HMAC-SHA256 keyed by
+      `AGENT_ID_SECRET`, over the identity id; a project is `pr_` and the same
+      construction over the project id, the HMAC input carrying a different domain
+      prefix for each. Stable in a deployment, and not reversible without the
+      key (a
+      pseudonym: whoever holds the key and a candidate list can test candidates,
+      so
+      the key is kept like a password and is in no table, and the server refuses
+      a
+      short, patterned or low-variety one). The principal id itself is the identity
+      (usually an email) and is not opaque. This does not reopen D-54: nothing stored
+      is pseudonymized. `GET /api/agent/projects/{ref}` finds the ref by
+      scanning the
+      rows the person's dashboard shows, so an unknown, an invisible and an archived
+      project are one 404. In v1 an agent can say "project `pr_...` has criterion
+      `s1-3` marked `notmet`" and cannot name the project; a name would arrive
+      as an
+      explicit opt-in, labeled untrusted text, as the issue says of free text.
+    - Limits. The token is checked before anything is limited (one indexed read,
+      no
+      write). A verified token spends only its own allowance and its person's
+      (120 a
+      window across all that person's tokens). A failure spends only its source's
+      (30 a window, then 429 with no write) and a global budget (600 a window across
+      all sources, then 429 with no per-source accounting at all, so rotating source
+      keys cannot make the server work or log more). A failure is a read-trail row
+      only when it names a token that exists, within budgets by kind that cannot
+      starve each other: wrong secrets (which anybody who has seen a public id can
+      send) at most 10 per token id a window across all sources, a right secret
+      on a
+      stopped token and a project not visible 5 per token id, and 100 of each kind
+      overall. The tallies are bounded (10,000 sources, oldest idle dropped first,
+      never an active attacker's bucket reset) and O(1) per failure. What is not
+      written is one aggregated `agent.failures` line a window, written by a
+      background task every half window and at shutdown. The source is the socket
+      peer, or the address the proxy reported when `TRUSTED_PROXY_CIDR` is set and
+      the peer is inside it, validated as an IP address or `unknown`; the image
+      starts uvicorn with `--no-proxy-headers`.
+    - Proxy. `proxy/Caddyfile` has a handle, above the sign-on one, that forwards
+      only the three GET routes, deletes sixteen identity header names it knows
+      and
+      sets none (the API reads no identity header on these routes, so the list is
+      defense in depth and is fixed), and answers anything else under the prefix
+      with
+      a 404. A request that slips through to a route that needs an identity arrives
+      with none and gets a 401. The API's access log drops the query string of a
+      request whose decoded path is under `/api/agent/`; Caddy's log drops it
+      for any
+      request whose raw target is or might be an agent route (the word agent, a
+      percent-encoded character, an absolute-form target, a dot or empty segment:
+      Caddy routes on the cleaned path and logs the raw one) and redacts five
+      token-like header names. A token in a URL path, in a header with another name,
+      or logged by a front door in front of this stack is not covered, and the docs
+      say so (C-114 is partial).
+    - Operator. `scripts/agent_tokens.py` and `make agent-tokens` list and
+      revoke, as
+      the database owner, the way `make dispose` works.
+- **Rejected.**
+    - Option (b), a front door that authenticates the agent. Each front door
+      differs, several cannot give a non-browser client a credential at all, and
+      the app would still have to trust a header from a client with no session.
+    - A shared service account. It violates the rule that access follows the
+      person: one identity cannot be "the same staff access control" as every user,
+      and the read trail would name the account and not the person.
+    - Accepting a token on the existing routes. It would let a stolen token write,
+      delete and mint its own successors.
+    - A longer lifetime, or a refresh. The point of 8 hours is that nothing in the
+      app has to notice a departure.
+    - An in-app administrator role. The repository has none, and adding one to
+      revoke a token would add an identity and a permission to review.
+- **Proposed defaults, for the owner to confirm.** Where the owner's answer left
+  a
+  gap, this is what was built.
+    - (a) "An admin can revoke" is an operator action (`make agent-tokens`),
+      with no
+      new role; a person can also revoke their own through the API.
+    - (b) "Dies with the user" means the user's principal is erased from this app
+      (`make dispose`, or SQL), which deletes the tokens by foreign key. Removal
+      from the identity provider is **not seen**, because the app does not read
+      the
+      directory; the 8 hours is the bound, and the docs say so.
+    - (c) At most 5 live tokens per person, settable with `AGENT_MAX_ACTIVE_TOKENS`.
+    - (d) "Visible" is exactly what `GET /api/projects` lists for the person
+      (access lists enforced, unclaimed projects included, as the dashboard shows
+      them), minus archived. Records stamped for another framework are returned
+      with
+      their `framework` id and can be filtered by it; the dashboard of a build of
+      one framework hides the others', and this does not.
+    - (e) The API is off until `AGENT_ID_SECRET` is set (at least 32 characters).
+    - (f) `overdue` is a plain comparison of a stored due date with today's date
+      in
+      UTC, with no look at the status, so a settled item with an old due date reads
+      overdue. The dashboard's flag looks at the status and the viewer's local date.
+    - (g) The per-token limit is 60 a minute (`AGENT_RATE_LIMIT_MAX_REQUESTS`);
+      a
+      source may fail 30 times a window (`AGENT_FAILURE_RATE_LIMIT_MAX_REQUESTS`),
+      all sources together 600 (`AGENT_GLOBAL_FAILURE_RATE_LIMIT_MAX_REQUESTS`),
+      and
+      a person's tokens share 120 calls (`AGENT_USER_RATE_LIMIT_MAX_REQUESTS`).
+      A
+      429 is not a read-trail row (a flood of refusals must not become a flood of
+      rows); the failures are one aggregated security-log line a window. The row
+      budgets by kind (10, 5, 5 per token id, 100 overall) are defaults too.
+    - (h) A refusal is a read-trail row (`agent_refused`) only for a token that
+      exists, naming the person only when the secret matched (an expired or revoked
+      token) and `unknown` for a wrong secret; the reason is in the row and
+      never in
+      the response. A project a valid token cannot see is also a row (`not_visible`).
+    - (i) An emergency-access identity may mint a token, and the token carries no
+      emergency rights.
+    - (j) Tokens are not purged on a schedule: a row stays, expired, until its
+      principal is erased. After `make restore`, revoke everyone's.
+    - (k) The words an agent may be given come from the build's manifest (see
+      Allowlist), so a build whose manifest has none shows an agent no item or
+      checkpoint, and a record of a framework the build does not carry shows only
+      its references and people.
+    - (l) A person mints through the API for now (the dashboard page is PR 2).
+    - (m) Project references only in v1; names are a later opt-in (see Opaque ids).
+    - (n) The replication caveat: the limiters are in process, so behind N replicas
+      each ceiling is N times its setting.
+- **Cost, stated.** A path of the API is reachable without single sign-on, so the
+  token is the only thing between a caller and the data on it; a front door that
+  authenticates every path cannot offer the agent API at all. The docs say where
+  it
+  cannot be done, and only the Caddyfile in this repository is tested for it.
+- Source: #164 and the owner's decisions of 2026-10-10; R-71; amends R-06 for the
+  agent routes (D-03 stands for every other route).

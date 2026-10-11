@@ -29,6 +29,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any
 
+import asyncpg
 from fastapi import HTTPException, status
 
 from .securitylog import SecurityEvent, emit
@@ -145,6 +146,30 @@ def can_own(
     if not enforced or unclaimed(doc) or emergency:
         return True
     return role_of(doc, user_id) == "owner"
+
+
+async def readable_rows(
+    conn: asyncpg.Connection,
+    user_id: str | None,
+    *,
+    enforced: bool,
+    emergency: bool = False,
+) -> list[asyncpg.Record]:
+    """Every project row the user may read, newest change first.
+
+    The one list of what a person's dashboard is given: ``GET /api/projects`` and
+    the agent API (#164) both read it here, so what an agent sees cannot drift from
+    what the same user's own list shows. An agent passes ``emergency=False``, always.
+    """
+    rows = await conn.fetch(
+        "SELECT id, doc, updated_at, updated_by FROM projects "
+        "ORDER BY updated_at DESC, id ASC"
+    )
+    return [
+        row
+        for row in rows
+        if can_read(row["doc"] or {}, user_id, enforced=enforced, emergency=emergency)
+    ]
 
 
 def require(

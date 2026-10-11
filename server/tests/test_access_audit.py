@@ -20,7 +20,7 @@ import re
 from pathlib import Path
 
 import pytest
-from app.accessaudit import AccessAction
+from app.accessaudit import AccessAction, AccessVia
 from app.main import configure_logging
 from httpx import ASGITransport, AsyncClient
 
@@ -248,10 +248,16 @@ async def test_the_check_constraint_and_the_enum_agree(client: AsyncClient) -> N
         definition = await conn.fetchval(
             "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
             "WHERE conrelid = 'access_event'::regclass AND contype = 'c' "
-            "AND pg_get_constraintdef(oid) LIKE '%action%'"
+            "AND conname = 'access_event_action_known'"
+        )
+        via = await conn.fetchval(
+            "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+            "WHERE conrelid = 'access_event'::regclass AND contype = 'c' "
+            "AND conname = 'access_event_via_known'"
         )
     in_db = set(re.findall(r"'([a-z_]+)'", definition))
     assert in_db == {a.value for a in AccessAction}
+    assert set(re.findall(r"'([a-z_]+)'", via)) == {v.value for v in AccessVia}
 
 
 DOC = Path(__file__).resolve().parents[2] / "docs" / "deploy.md"

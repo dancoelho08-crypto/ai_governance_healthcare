@@ -30,6 +30,7 @@ nav = [
   { "Running it" = "running.md" },
   { "Self-hosting" = "self-hosting.md" },
   { "Cloud deployment" = "deploy.md" },
+  { "The agent API" = "agent-api.md" },
   { "Privacy and retention" = "privacy.md" },
   { "Security claims" = "security-claims.md" },
   { "Exports" = "exports.md" },

@@ -49,6 +49,31 @@ def retirement_pairs(definition: dict) -> list[dict[str, str]]:
     return [{"gate": g, "decision": d} for g, d in sorted(pairs)]
 
 
+def vocabulary(definition: dict) -> dict[str, list[str]]:
+    """The words of a definition an agent may be shown (#164, D-89): its item ids,
+    checkpoint ids, status values and checkpoint options. Sorted, so the manifest
+    is byte-stable. What a record stores outside these is free text to the server,
+    and the agent API drops it."""
+    return {
+        "items": sorted(
+            {
+                item["id"]
+                for section in definition.get("sections", [])
+                for item in section.get("items", [])
+            }
+        ),
+        "gates": sorted({g["id"] for g in definition.get("gates", [])}),
+        "statuses": sorted({s["value"] for s in definition.get("statuses", [])}),
+        "decisions": sorted(
+            {
+                option["value"]
+                for gate in definition.get("gates", [])
+                for option in gate["options"]
+            }
+        ),
+    }
+
+
 def rule_set_hash(framework_id: str, pairs: list[dict[str, str]]) -> str:
     """SHA-256 of a framework's retirement rules."""
     rules = sorted([p["gate"], p["decision"]] for p in pairs)
@@ -66,6 +91,10 @@ def manifest(defs: dict[str, dict], primary: str) -> dict:
             "version": d["version"],
             "sha256": hashlib.sha256(canonical_json(d)).hexdigest(),
             "retire": retirement_pairs(d),
+            # Read by the migrate job into agent_vocabulary (migration 014). It
+            # decides what an agent may see and nothing about disposal, so it is
+            # outside the rule-set hash and needs no acknowledgment (D-89).
+            "vocab": vocabulary(d),
         }
         for fid, d in defs.items()
     ]

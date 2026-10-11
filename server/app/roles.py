@@ -69,6 +69,15 @@ GRANTS: Mapping[str, tuple[str, ...]] = {
     # them, so a compromised API cannot make a record come due for disposal early.
     "retirement_rule": ("SELECT",),
     "retirement_rule_change": ("SELECT",),
+    # Agent tokens (#164, 013). The API mints one (INSERT), authenticates by one
+    # (SELECT), and records its use and its revocation (UPDATE). A trigger lets only
+    # those two columns move, and no DELETE is granted: a token leaves by expiring, or
+    # with its principal (ON DELETE CASCADE, which runs with the owner's rights).
+    "agent_token": ("SELECT", "INSERT", "UPDATE"),
+    # The words an agent may be shown, loaded from the build's manifest by the migrate
+    # job (014, D-89). The API only reads it: a compromised API cannot widen what an
+    # agent is shown.
+    "agent_vocabulary": ("SELECT",),
 }
 
 # Tables the API must never touch at all: the owner's migration bookkeeping.

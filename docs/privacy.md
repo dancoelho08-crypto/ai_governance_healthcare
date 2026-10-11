@@ -36,6 +36,40 @@ them, when they acted, and what they did.
 | `project_deletion` | who deleted a project |
 | `access_event` | who read what, and the source address |
 | `principals` | the name and email the proxy asserted for each identifier |
+| `agent_token` | the owner's identifier, a label they typed, when a token was made, used and revoked, and a hash of its secret ([The agent API](agent-api.md)) |
+
+## What an agent call discloses
+
+A person can mint a token for a program to read, on their behalf, what their own
+dashboard shows ([The agent API](agent-api.md)). What a call returns is the stored
+statuses, decisions and dates of the projects that person can open, an overdue
+comparison, and who may open each project as **opaque ids**: a keyed pseudonym that
+names nobody without the key. A project is returned as an opaque reference too,
+not by its id or its name, and an item or checkpoint id is returned only if it
+is a
+word of the framework definitions. No name, no email and no free text is returned
+(no note, no rationale, no evidence title, no project name). The projects are the
+person's own and archived ones are left out. Every answered call is a row in the
+read trail, marked as agent access, with the token's public id and the projects
+returned, so it can be answered who read what and by which token; a refusal of a
+token
+that exists is a row, and a flood of unknown tokens is counted in the security
+log without being a row. A token is deleted with the person's `principals` row,
+and
+a token that has not been revoked still stops working after 8 hours.
+
+Where an answer goes after it leaves this server is **not** this server's decision
+and not something it can see. If the program that holds a token sends answers to
+a
+model run by someone else, that is a disclosure of your governance metadata to that
+operator, and whether it is acceptable, under what agreement, is for your
+organization and your counsel to decide before a person mints a token. The answers
+hold no patient data (patient data is out of scope in every mode), but the list
+of
+your AI projects and their review status is the kind of thing an organization may
+not want to share. A self-hosted model, or one your organization already
+approves for
+this data, keeps it inside the boundary you have already drawn.
 
 ## How long it is kept
 
@@ -197,7 +231,7 @@ the entry, to be completed and owned by the controller:
 | Controller | *your organization* |
 | Purpose | Recording the review and sign-off of AI solutions the organization deploys or evaluates |
 | Data subjects | Staff who sign in to the governance server |
-| Categories of data | Identifier, name, email, the actions they took and when, what they read, source address |
+| Categories of data | Identifier, name, email, the actions they took and when, what they read (and whether through an agent token), source address |
 | Recipients | *those you give access to the project; the operators of the database and its backups* |
 | Transfers outside the region | *see "Data residency" in [Cloud deployment](deploy.md); a decision for your DPO* |
 | Retention | See "How long it is kept" above (R-54); confirm against your records retention schedule |
