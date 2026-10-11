@@ -89,7 +89,7 @@ An address in a value never keeps its credentials in the Markdown report: a user
 name and password in an address such as `https://user:pass@host/`, which a
 Markdown renderer turns into a link, are left out of the report even when the
 record holds them, and the dashboard removes them when they are typed or
-imported (R-70). The JSON export is the record as stored and the CSV is a list
+imported (R-70). The JSON export is the saved record itself and the CSV is a list
 of values, so neither changes: a credential saved before this rule is still in
 them.
 
