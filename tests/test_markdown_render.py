@@ -26,7 +26,8 @@ The audit has three parts:
   * the HTML, parsed by Python's parser: only the expected elements (headings,
     paragraphs, lists, table parts, strong, em, a, hr), no `on*` or style attribute,
     no attribute starting with a script scheme, every link http(s) without
-    credentials, no comment or declaration;
+    credentials (a bare address a GFM renderer links counts: the export removes the
+    credentials from every address, R-70), no comment or declaration;
   * the same HTML loaded in a real page, audited by the injection suite's own
     `AUDIT`: nothing ran, no element carries the payloads' marker.
 
@@ -159,11 +160,6 @@ class Auditor(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.bad: set[str] = set()
         self.blocks: list[str] = []
-        # A bare address a GFM renderer made a link of (its text is its address).
-        # Not a link the app wrote: the notes parser refuses credentials (R-62).
-        self.autolinked: list[str] = []
-        self._credentials: str | None = None
-        self._text = ""
 
     def handle_starttag(self, tag: str, attrs: list) -> None:
         if tag not in ALLOWED_TAGS:
@@ -183,20 +179,11 @@ class Auditor(HTMLParser):
                 if parts.scheme.lower() not in ("http", "https"):
                     self.bad.add(f"a link that is not http(s): {value[:30]!r}")
                 elif "@" in parts.netloc:
-                    self._credentials, self._text = value, ""
+                    # Whatever its text: a bare address a renderer linked is a link
+                    # with credentials too (R-70, #194).
+                    self.bad.add("a link with credentials")
             elif name not in ("href",):
                 self.bad.add(f"an attribute: {tag} {name}")
-
-    def handle_data(self, data: str) -> None:
-        self._text += data
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag == "a" and self._credentials is not None:
-            if self._text == self._credentials:
-                self.autolinked.append(self._credentials)
-            else:
-                self.bad.add("a link with credentials")
-            self._credentials = None
 
     def handle_startendtag(self, tag: str, attrs: list) -> None:
         self.handle_starttag(tag, attrs)
@@ -219,13 +206,6 @@ def html_audit(html: str) -> tuple[list[str], list[str]]:
     auditor.feed(html)
     auditor.close()
     return sorted(auditor.bad), auditor.blocks
-
-
-def autolinked_credentials(html: str) -> list[str]:
-    auditor = Auditor()
-    auditor.feed(html)
-    auditor.close()
-    return auditor.autolinked
 
 
 # Run in a page that holds the rendered HTML in #out: the injection suite's AUDIT
@@ -507,19 +487,13 @@ def audit_units() -> None:
             any(want in p for p in problems),
             str(problems),
         )
-    # Known (C-82, D-85): a GFM renderer links a bare address a person typed, with
-    # its credentials, and the export does not stop it. The text of that link is
-    # its address, so it is reported apart from a link with other text, which fails.
-    found = html_audit(
-        '<p><a href="https://u:p@e.example/">https://u:p@e.example/</a></p>'
-    )
+    # A GFM renderer links a bare address a person typed, with its credentials: the
+    # export removes them (R-70, #194), and this is what notices if it does not.
+    bare = RENDERERS["gfm"].render("see https://u:p@e.example/ now")
     check(
-        "a bare address with credentials is a known gap, not a pass or a fail",
-        not found[0]
-        and autolinked_credentials(
-            RENDERERS["gfm"].render("see https://u:p@e.example/ now")
-        )
-        == ["https://u:p@e.example/"],
+        "a bare address with credentials, linked by a renderer, fails the audit",
+        html_audit(bare)[0] == ["a link with credentials"],
+        str(html_audit(bare)[0]),
     )
     check(
         "a link with credentials and other text fails",
@@ -528,9 +502,13 @@ def audit_units() -> None:
     )
     check(
         "a renderer that does not autolink makes no such link",
-        not autolinked_credentials(
+        not html_audit(
             RENDERERS["commonmark"].render("see https://u:p@e.example/ now")
-        ),
+        )[0],
+    )
+    check(
+        "the same address without credentials is a link and passes",
+        not html_audit(RENDERERS["gfm"].render("see https://e.example/?a=b@c now"))[0],
     )
     # The renderer that refuses raw HTML shows it as text: only the html-enabled
     # configurations can notice it, which is why the worst case is audited.
@@ -580,6 +558,24 @@ MUTATIONS = [
         "html_inline",
     ),
     (
+        "the credentials backstop removed from line() (R-70, #194)",
+        "creds_line",
+        "https://u:p@evil.example/x",
+        "a link with credentials",
+    ),
+    (
+        "the credentials backstop removed from the notes (R-70, #194)",
+        "creds_notes",
+        "https://u:p@evil.example/x",
+        "a link with credentials",
+    ),
+    (
+        "stripAddressCredentials does nothing (R-70, #194)",
+        "creds_all",
+        "https://u:p@evil.example/x",
+        "a link with credentials",
+    ),
+    (
         "safeUrl lets any link through, so mdInlineMarkdown writes it",
         "link",
         "[a](ftp://evil.example/x) [b](//evil.example/y)",
@@ -611,6 +607,30 @@ def weakened_page(source: str, kind: str) -> str:
             marker = "function safeUrl(raw){"
             assert marker in source
             out = source.replace(marker, marker + "return String(raw);", 1)
+        case "creds_line":
+            marker = "const line=s=>stripAddressCredentials("
+            assert marker in source
+            out = source.replace(marker, "const line=s=>((x)=>({text:x}))(", 1)
+        case "creds_notes":
+            out = source
+            for marker, repl in (
+                (
+                    'mdParse(stripAddressCredentials(String(source ?? "")).text)',
+                    'mdParse(String(source ?? ""))',
+                ),
+                (
+                    "stripAddressCredentials(String(s)).text.replace(MD_SPECIAL",
+                    "String(s).replace(MD_SPECIAL",
+                ),
+            ):
+                assert marker in out, marker
+                out = out.replace(marker, repl, 1)
+        case "creds_all":
+            marker = "function stripAddressCredentials(text){"
+            assert marker in source
+            out = source.replace(
+                marker, marker + "return {text: String(text ?? ''), removed: 0};", 1
+            )
         case _:
             raise ValueError(kind)
     assert out != source, kind

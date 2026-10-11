@@ -1343,6 +1343,32 @@ honest answer and is a gap worth closing; see R-19.
 - Enforced by: `tests/test_export_schema.py`, `tests/test_fingerprint_skip.py`,
   `server/tests/test_fingerprint.py`.
 
+### R-70 An address in text never keeps its credentials
+
+- Status: Active
+- A user name or password in an address (`https://user:pass@host/`,
+  `http://user@host`, any scheme before `://`, and a protocol-relative `//`) is
+  removed, and the rest of the address is kept, wherever text enters the
+  dashboard or leaves it as Markdown: in every free-text field a person types or
+  pastes, in a JSON file or an older review imported, and in the Markdown report,
+  even for a record that already holds them. The person is told, in their
+  language, without the credentials repeated, and the change history never
+  records them. An address with `user:pass@host` and no scheme is not an address
+  in this sense: no renderer links it.
+- The JSON export is the record as stored and keeps what was stored (a data
+  contract, and the fingerprint is over it); so does the CSV. A credential stored
+  before this rule is therefore still in those two (D-88).
+- The owner's decision, 2026-10-10, option c on #194: detect and remove, rather
+  than escape in the export or refuse at entry.
+- Source: the owner's decision on #194; DECISIONS D-88; claim C-82 and the
+  sentences in `docs/guide.md` and `docs/exports.md` (C-118).
+- Enforced by: `tests/test_address_credentials.py` (the function on a table of
+  cases, against the URL parser and markdown-it's linkify, every free-text field,
+  typing, the references, a new project, a hold reason, import, the history, the
+  Markdown export of a record planted with credentials, and a mutation of each
+  rule and guard) and `tests/test_markdown_render.py`, whose audit fails on any
+  credentialed link in any rendered configuration (D-85).
+
 ### R-71 Agents read through per-user, short-lived tokens
 
 - Status: Active

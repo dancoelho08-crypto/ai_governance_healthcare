@@ -2679,15 +2679,17 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
   schema is removed, because GitHub does not make either from bare text. The
   developer-only pseudo-locale `en-XA` is left out, since it pads strings with
   tildes the renderer reads as strikethrough; no reader chooses it.
-- **Known, and not fixed here.** A GFM renderer (GitHub's too) turns a bare
-  address in a value into a link, including `https://user:pass@host/`, because
-  `line()` escapes Markdown's structure and not an address. The audit allows a
-  credentialed link only when its text is its address, and a test pins that
-  this is what happens, so a fix (escaping the colon after a scheme) would be
-  noticed and the pin removed. It is the owner's call whether the Markdown
-  report should stop addresses from linking. Also not noticed by the
-  structure comparison: a pipe that ends a table cell early, because GFM drops
-  the excess cells and the block tags stay the same.
+- **Known, and not fixed here (fixed by #194, D-88: the export removes the
+  credentials and the audit no longer allows any credentialed link; read the
+  rest as the state when this was written).** A GFM renderer (GitHub's too)
+  turns a bare address in a value into a link, including
+  `https://user:pass@host/`, because `line()` escapes Markdown's structure and
+  not an address. The audit allows a credentialed link only when its text is its
+  address, and a test pins that this is what happens, so a fix (escaping the
+  colon after a scheme) would be noticed and the pin removed. It is the owner's
+  call whether the Markdown report should stop addresses from linking. Also not
+  noticed by the structure comparison: a pipe that ends a table cell early,
+  because GFM drops the excess cells and the block tags stay the same.
 - **Reproducible.** `markdown-it-py` and `linkify-it-py` are in
   `pixi.toml`'s pypi-dependencies and locked in `pixi.lock` with hashes; nothing
   is fetched at test time.
@@ -2785,6 +2787,68 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
 - Enforced by: `tests/test_save_refused.py` (each refused status sent once with
   the edit kept; each transient failure sent six times; markup in the reason
   shown as text; every language; six mutations of the built page each noticed).
+
+### D-88 Credentials in an address are detected and removed, not escaped or refused
+
+- Status: Accepted (the owner chose option c on #194, 2026-10-10)
+- **The problem.** `exportMD()`'s `line()` escapes Markdown's structure and not
+  a bare address, so a GFM renderer links `https://user:pass@host/` typed into
+  any field, with the password, which bypassed C-86's "http(s) with no
+  credentials" (D-85 had pinned it as a known gap).
+- **The rule.** One pure function, `stripAddressCredentials(text) -> {text,
+  removed}`, in `app/js/00-core/55-refs.js` beside `safeUrl`, the one place that
+  says what an address is. It removes the userinfo (`user:pass@`, `user@`) of
+  anything with a scheme and `://` (any scheme: markdown-it's linkify links
+  `http`, `https` and `ftp` bare, and any scheme in angle brackets) and of a
+  protocol-relative `//` (linkify-it's defaults link it; GitHub does not). The
+  userinfo runs to the last `@` before the first `/`, `?` or `#`, as the URL
+  standard has it, so `https://host/path?email=a@b.c` is untouched and
+  `https://a@b@host/` loses both. It cleans an `@` with nothing after it, since
+  a person typing has not typed the host yet. Case-insensitive; the rules are a
+  frozen set (`AddrRule`). It is idempotent, and linear in time (the scheme is
+  bounded). `scrubAddressCredentials` applies it to every string inside a value.
+  `user:pass@host` with no scheme is left alone: no renderer links it (tested
+  with linkify-it, with and without ftp and `//`), and stripping it would eat
+  ordinary email-like text. The URL parser is the test's oracle, not a
+  dependency: it refuses a half-typed address that this must still clean.
+- **Where it applies.** (1) Entry: `edit()` is the one funnel every typed,
+  pasted or programmatic field write passes through (project setup, every
+  criterion's evidence, owner and reason, checkpoint rationale, decider and
+  conditions, metrics, the model card, OPTICA answers, an evidence reference's
+  title); it cleans before the value is stored, queued or described in the
+  history, returns what was stored so the field shows it, and toasts
+  (`toast.credsRemoved`). Also a new project's name, and a hold reason. An
+  evidence reference's own address field still refuses credentials outright
+  (C-86), which is stricter. (2) Import: a JSON file and an older review saved
+  in this browser are scrubbed in full before the record is made, with their own
+  message, and `createProject` scrubs again as the net under every way a record
+  is made. (3) Backstop: `line()`, the notes' Markdown (`mdInlineMarkdown`, each
+  run in `mdEscape`) clean what they write, so a record already holding
+  credentials (the server's, or one older than this) never prints them in the
+  Markdown report, and the stored record and its fingerprint are untouched. (4)
+  The change history: `logChange` cleans a copy of the earlier and the new
+  value, so a credential an older record holds is never copied into an entry.
+- **Not changed.** The JSON export (`_state` is the record as stored, and its
+  fingerprint is over it) and the CSV. A credential stored before this rule is
+  still in them, and in a server's version history. Honest limit: typed one
+  character at a time, `https://user:pass` is stored by autosave before the `@`
+  is typed, so a save in between can reach the server's history; the rule
+  removes it from the record when the address is completed, and cannot recall a
+  revision. The HTML and PDF reports never link text (every value is escaped),
+  so they were not changed, and still print a credential an older record holds
+  as plain text. An access id typed in the grant box is an identity, not an
+  address, and is not cleaned.
+- **Rejected:** escaping the scheme in the export only (`https\://...`: it hides
+  the link, leaves the secret in the report and in every other copy, and relies
+  on every renderer honoring the escape); leaving it (a password printed in a
+  board report and offered as a click); refusing at entry (the owner chose to
+  clean and tell, which does not lose what the person typed and does not block
+  them); hoisting a regex constant per field (the funnel is `edit()`); stripping
+  `user:pass@host` with no scheme (false positives, no link to prevent).
+- Source: #194; the owner's decision on it; DECISIONS D-85; claims C-82, C-118.
+- Enforced by: `tests/test_address_credentials.py` (`pixi run
+  test-address-credentials`, in CI's browser job) and `tests/test_markdown_render.py`
+  (any credentialed link fails the audit; mutations of the backstop are rejected).
 
 ### D-89 Agents read through per-user tokens the app mints
 

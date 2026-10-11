@@ -1075,14 +1075,16 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
   other reader: GitHub's own renderer and sanitizer, an editor preview and a wiki are
   not run, and syntax only some of them add (an @mention, a #reference, `$` math, an
   emoji code, a footnote, an email autolink, a wiki's own markup) is not audited. A
-  GFM renderer also links a bare address a person typed, including one with
-  credentials (`https://user:pass@host/`), and the export does not stop it: the link's
-  text is its address, and the audit reports it apart from a link with other text.
-  A claim about every renderer cannot be proven with one, so this stays partial.
+  GFM renderer links a bare address a person typed, and a bare address with
+  credentials (`https://user:pass@host/`) used to pass the audit; since #194 (D-88)
+  the dashboard removes the credentials on entry and import and the export removes
+  them again, and the audit fails on any credentialed link (C-118). A claim about
+  every renderer cannot be proven with one, so this stays partial.
 - **Enforced by:**
   `tests/test_markdown_render.py::every payload, sample and language renders as text in every configuration`
   `tests/test_markdown_render.py::the example build's poisoned definition and records render as text`
   `tests/test_markdown_render.py::every weakened export is rejected`
+  `tests/test_markdown_render.py::a bare address with credentials, linked by a renderer, fails the audit`
   `tests/test_injection.py::an app that does not escape is rejected`
   `tests/test_injection.py::the CSV rule notices a formula cell`
   `tests/test_injection.py::the Markdown rules notice a heading, a script link and raw HTML`
@@ -1424,6 +1426,35 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
   `tests/test_export_schema.py::its export's fingerprint is the stored record's`
   `tests/test_export_schema.py::an edit's history entry carries the fingerprint of what was stored`
   `tests/test_fingerprint_skip.py::all six places name the same fields`
+
+### C-118 Credentials are removed from addresses in text
+
+- **Claim:** A user name or password in an address a person types, pastes or
+  imports, in any field, is removed and the person is told, the change history
+  never records it, and the Markdown report never prints it, even for a record that
+  already holds it; the stored record, its fingerprint and the JSON export are not
+  changed by the report (R-70).
+- **Asserted in:** `docs/guide.md` — "**Credentials are removed from addresses.**"
+- **Asserted in:** `docs/exports.md` — "An address in a value never keeps its credentials in the Markdown report"
+- **Status:** enforced
+- **Enforced by:**
+  `tests/test_address_credentials.py::every case: what remains, the count and idempotence`
+  `tests/test_address_credentials.py::every weakened rule is noticed`
+  `tests/test_address_credentials.py::the password is nowhere: not the record, the history, the queue or storage`
+  `tests/test_address_credentials.py::the field ends as the address without credentials`
+  `tests/test_address_credentials.py::a reference's title loses the credentials`
+  `tests/test_address_credentials.py::a new project's name loses the credentials`
+  `tests/test_address_credentials.py::a hold reason is sent without the credentials`
+  `tests/test_address_credentials.py::and holds no password, in its words or its from and to`
+  `tests/test_address_credentials.py::every field that carried credentials holds the address without them`
+  `tests/test_address_credentials.py::a legacy review keeps its address without the credentials`
+  `tests/test_address_credentials.py::a record made with credentials is stored without`
+  `tests/test_address_credentials.py::the Markdown report has no password`
+  `tests/test_address_credentials.py::the stored record is unchanged by the export`
+  `tests/test_address_credentials.py::so is its fingerprint`
+  `tests/test_address_credentials.py::the JSON export keeps the stored text, as its contract says`
+  `tests/test_address_credentials.py::every weakened guard is noticed`
+  `tests/test_markdown_render.py::every weakened export is rejected`
 
 ### C-97 A token is accepted on the agent routes and on no other
 

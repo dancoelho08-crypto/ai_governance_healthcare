@@ -91,7 +91,8 @@ document.addEventListener("click",async e=>{
   if(a==="legacy"){
     try{ const j=JSON.parse(localStorage.getItem("chai-review-v1")); if(!isOwnRecord(j)) throw new Error("another framework's record"); const p=normalize(Object.assign(blankProject(j.meta.solution),{meta:j.meta,items:j.items||{},gates:j.gates||{},metrics:j.metrics||[],card:j.card||{}}));
       Object.values(p.items).forEach(x=>{ if(x) delete x._open; });
-      const id=await createProject(p,"Imported from a review saved in this browser"); if(id){ localStorage.setItem("chai-legacy-imported","1"); document.getElementById("legacyBanner")?.remove(); toast(t("toast.legacyImported")); }
+      const cut=scrubAddressCredentials(p).removed;
+      const id=await createProject(p,"Imported from a review saved in this browser"); if(id){ localStorage.setItem("chai-legacy-imported","1"); document.getElementById("legacyBanner")?.remove(); toast(t(cut?"toast.legacyImportedCreds":"toast.legacyImported")); }
     }catch(err){ toast(t("toast.legacyFailed")); }
     return;
   }
@@ -128,7 +129,9 @@ document.addEventListener("click",async e=>{
 document.addEventListener("submit",async e=>{
   if(e.target.id!=="newform") return; e.preventDefault();
   const name=document.getElementById("newname").value.trim(); if(!name){ document.getElementById("newname").focus(); return; }
-  const id=await createProject(blankProject(name),"Project created");
+  const fresh=blankProject(name), cut=scrubAddressCredentials(fresh).removed;
+  if(cut) toast(t("toast.credsRemoved"));
+  const id=await createProject(fresh,"Project created");
   if(id){ const wait=()=>PROJECTS.has(id)?openProject(id,"setup"):setTimeout(wait,120); wait(); }
 });
 document.addEventListener("input",e=>{
@@ -148,7 +151,15 @@ document.addEventListener("input",e=>{
   // Mark this as live typing so the changelog waits for the field to be
   // finished rather than describing each keystroke.
   setTyping(true);
-  try{ edit(p, el.value); } finally { setTyping(false); }
+  let stored;
+  try{ stored = edit(p, el.value); } finally { setTyping(false); }
+  // Credentials in an address were removed (R-70): show what is kept, with the
+  // caret where it was, rather than leaving the secret on the screen.
+  if(typeof stored === "string" && stored !== el.value){
+    const gone = el.value.length - stored.length, at = el.selectionStart;
+    el.value = stored;
+    if(typeof at === "number") try{ const pos = Math.max(0, at - gone); el.setSelectionRange(pos, pos); }catch(e){}  // a field with no caret
+  }
   if(p.startsWith("meta.")||p.startsWith("card.")||p.startsWith("metrics.")) renderPanel();
   if(p==="meta.solution"||p.startsWith("card.")) renderRail();
 });
@@ -187,8 +198,9 @@ document.getElementById("importFile").onchange=async e=>{
     Object.values(p.items).forEach(x=>{ if(x) delete x._open; }); delete p.view;
     p.updatedAt=new Date().toISOString(); p.updatedBy=ME.id||null;
     if(!isOwnRecord(p)){ toast(t("toast.foreignRecord",{name:String(recordFramework(p)).slice(0,64)})); e.target.value=""; return; }
+    const cut=scrubAddressCredentials(p).removed;
     const id=await createProject(p,"Imported from a JSON export");
-    if(id) toast(t("toast.imported"));
+    if(id) toast(t(cut?"toast.importedCreds":"toast.imported"));
   }catch(err){ toast(t("toast.badImport")); }
   e.target.value="";
 };
