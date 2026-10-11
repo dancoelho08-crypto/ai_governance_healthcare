@@ -12,4 +12,6 @@ exclude = [
     ".pixi",
     "site",      # Zensical build output
     ".cache",    # Zensical build cache
+    # Test data for the spelling guard, kept as a verifier wrote it (#169).
+    "tests/fixtures/spelling_corpus",
 ]

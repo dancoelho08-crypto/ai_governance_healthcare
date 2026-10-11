@@ -13,6 +13,7 @@ most -- an OPTICA answer never moves a CHAI score.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -22,6 +23,16 @@ ROOT = Path(__file__).resolve().parent.parent
 APP = ROOT / "docs" / "app" / "index.html"
 OPTICA_DEF = json.loads(
     (ROOT / "app" / "frameworks" / "optica" / "framework.json").read_text("utf-8")
+)
+
+# The words of the claim #175 removed, in each language's catalog: a count of
+# five (stakeholders, parties), "in sequence", and "relay". The screen groups by
+# a three-valued who (adopter, developer, either), so none may be said of it.
+FIVE_OR_SEQUENCE = re.compile(
+    r"five|\bcinco\b|\bcinq\b|fünf|пять|חמישה|पाँच|五"
+    r"|in sequence|secuencia|tour de rôle|nacheinander|по очереди|ברצף|क्रम से|依次"
+    r"|relay|relevo|relais|Staffellauf|эстафета|מרוץ שליחים|रिले|接力",
+    re.IGNORECASE,
 )
 
 FREEZE = """
@@ -201,6 +212,53 @@ def run() -> list[str]:
             "answers survive an off/on cycle",
             page.evaluate("(FACADES.optica.answers(S)['7-11'] || {}).status === 'met'"),
         )
+
+        # #175: the overview groups outstanding items by who can answer, a
+        # three-valued producer. Its words must not claim the five stakeholders
+        # (or a sequence) the screen does not show, in any language.
+        locales = sorted(f.stem for f in (ROOT / "app" / "i18n").glob("*.json"))
+        view_id = page.evaluate(
+            "activeViews().find(v => v.kind === ViewKind.OVERVIEW"
+            " && v.id.startsWith(FACADES.optica.vp)).id"
+        )
+        who_values = [w["value"] for w in OPTICA_DEF["whos"]]
+        stakeholder_claims: list[str] = []
+        shape: list[str] = []
+        for loc in locales:
+            page.evaluate(f"setLocale({loc!r})")
+            page.evaluate(f"go({view_id!r})")
+            page.wait_for_timeout(100)
+            shown = page.evaluate(
+                "({rows: [...document.querySelectorAll('main table.tbl tbody tr')]"
+                ".map(r => r.cells[0].textContent),"
+                " head: document.querySelector('main table.tbl th').textContent,"
+                " text: document.querySelector('main').innerText})"
+            )
+            labels = page.evaluate("FACADES.optica.def.whos.map(w => t(w.msg))")
+            if sorted(shown["rows"]) != sorted(labels):
+                shape.append(f"{loc}: rows {shown['rows']} vs whos {labels}")
+            if len(shown["rows"]) != len(who_values):
+                shape.append(f"{loc}: {len(shown['rows'])} rows for {len(who_values)}")
+            if len(shown["rows"]) != 5 and FIVE_OR_SEQUENCE.search(shown["text"]):
+                stakeholder_claims.append(f"{loc}: {shown['text'][:300]!r}")
+            catalog = json.loads(
+                (ROOT / "app" / "i18n" / f"{loc}.json").read_text("utf-8")
+            )
+            for key in ("fw.offDetail", "optica.lede", "optica.relay"):
+                if FIVE_OR_SEQUENCE.search(catalog[key]):
+                    stakeholder_claims.append(f"{loc} {key}: {catalog[key]!r}")
+        check(
+            "the overview groups by the three who-values, in every language",
+            not shape,
+            "; ".join(shape[:3]),
+        )
+        check(
+            "no language claims five stakeholders, a sequence or a relay the "
+            "overview does not show",
+            not stakeholder_claims,
+            "; ".join(stakeholder_claims[:3]),
+        )
+        page.evaluate("setLocale('en')")
 
         check("no page errors", not errors, "; ".join(errors[:3]))
         browser.close()

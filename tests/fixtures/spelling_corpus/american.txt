@@ -1,0 +1,47 @@
+# American scientific words that hold the letters of a British shape, and that
+# the en_US dictionary lacks (#169): geology, botany, chemistry, zoology and the
+# kitchen. Each line must produce no finding. Lines starting with '# ' are
+# comments.
+leucocratic
+leucogranite
+leucoxene
+leucosome
+leucosapphire
+leucoplast
+leucoplasts
+leucoindigo
+leucobase
+leucomalachite
+leucoanthocyanin
+leucocyanidin
+leucon
+leucodopachrome
+leucovorin
+nonaesthetic
+preaesthetic
+antiaesthetic
+unaesthetic
+oestrid
+oestrids
+haemosporidian
+haemosporidians
+haemogregarine
+haemonchosis
+asafoetida
+caeciliid
+caeciliids
+caecid
+caecids
+haemulid
+haemulids
+haemadipsid
+haemadipsids
+haemoproteid
+haemoproteids
+oestrosis
+oestriasis
+Gemella haemolysans
+Neisseria haemolysans
+Clostridium oedematiens
+Mycobacterium haemophilum
+Eimeria caecicola

@@ -1,0 +1,724 @@
+# The corpus a verifier probed the spelling guard with (#169): organisms,
+# drugs, places, titles, names, American words and code. Each line must produce
+# no finding. Lines starting with '# ' are comments; the file name the verifier
+# used is in each section's heading.
+# organisms (fp1.txt)
+Enterococcus faecalis
+Enterococcus faecium
+E. faecalis
+E. faecium
+Staphylococcus haemolyticus
+S. haemolyticus
+Haemophilus influenzae
+H. influenzae
+Haemophilus ducreyi
+Haemophilus parainfluenzae
+Mannheimia haemolytica
+Bibersteinia trehalosi
+Faecalibacterium prausnitzii
+F. prausnitzii
+Streptococcus haemolyticus
+Gardnerella vaginalis
+Aerococcus urinae
+Aeromonas hydrophila
+Aeromonas caviae
+Haematobia irritans
+Haemaphysalis longicornis
+Haemaphysalis longicornis ticks were found
+Haemonchus contortus
+Haemoproteus columbae
+Plasmodium falciparum
+Dermatobia hominis
+Cuterebra
+Oesophagostomum dentatum
+Oesophagostomum bifurcum
+Oesophagostomum infections in pigs
+Paederus fuscipes
+Paederus beetles
+Haematopinus suis
+Haemagogus janthinomys
+Haemadipsa zeylanica
+Bacteroides fragilis
+Clostridioides difficile
+Escherichia coli
+Klebsiella pneumoniae
+Pseudomonas aeruginosa
+Acinetobacter baumannii
+Haemophilus haemolyticus
+Mycoplasma haemofelis
+Mycoplasma haemocanis
+Candidatus Mycoplasma haemominutum
+Bartonella henselae
+Rickettsia rickettsii
+Leishmania donovani
+Trypanosoma cruzi
+Babesia microti
+Anaplasma phagocytophilum
+Ehrlichia chaffeensis
+Haemoproteus
+Leucocytozoon
+Leucocytozoon simondi
+Haemogregarina
+Haemogregarina stepanowi
+Hepatozoon americanum
+Helicobacter pylori
+Campylobacter jejuni
+Shigella sonnei
+Salmonella enterica serovar Typhimurium
+Vibrio cholerae
+Yersinia pestis
+Francisella tularensis
+Coxiella burnetii
+Legionella pneumophila
+Treponema pallidum
+Borrelia burgdorferi
+Neisseria gonorrhoeae
+N. gonorrhoeae
+Neisseria meningitidis
+Chlamydia trachomatis
+Trichomonas vaginalis
+Candida albicans
+Candida auris
+Aspergillus fumigatus
+Cryptococcus neoformans
+Pneumocystis jirovecii
+Histoplasma capsulatum
+Coccidioides immitis
+Blastomyces dermatitidis
+Sporothrix schenckii
+Toxoplasma gondii
+Giardia lamblia
+Entamoeba histolytica
+Cryptosporidium parvum
+Strongyloides stercoralis
+Ascaris lumbricoides
+Necator americanus
+Ancylostoma duodenale
+Schistosoma haematobium
+S. haematobium
+Schistosoma mansoni
+Wuchereria bancrofti
+Onchocerca volvulus
+Taenia solium
+Echinococcus granulosus
+Fasciola hepatica
+Anopheles gambiae
+Aedes aegypti
+Aedes albopictus
+Culex pipiens
+Ixodes scapularis
+Dermacentor variabilis
+Amblyomma americanum
+Cimex lectularius
+Pediculus humanus
+Sarcoptes scabiei
+Haemophilus aegyptius
+Moraxella catarrhalis
+Bordetella pertussis
+Corynebacterium diphtheriae
+Listeria monocytogenes
+Bacillus anthracis
+Clostridium botulinum
+Clostridium perfringens
+Clostridium tetani
+Mycobacterium tuberculosis
+Mycobacterium leprae
+Nocardia asteroides
+Actinomyces israelii
+Streptococcus pyogenes
+Streptococcus agalactiae
+Streptococcus pneumoniae
+Streptococcus sanguinis
+Streptococcus gallolyticus
+Streptococcus bovis
+Enterobacter cloacae
+Serratia marcescens
+Proteus mirabilis
+Morganella morganii
+Citrobacter freundii
+Stenotrophomonas maltophilia
+Burkholderia cepacia
+Burkholderia pseudomallei
+Eikenella corrodens
+Kingella kingae
+Capnocytophaga canimorsus
+Pasteurella multocida
+Haemobartonella felis
+Haemoproteus sp.
+Haemophilus spp.
+Haemophilus species
+Hypoderma bovis
+Gasterophilus intestinalis
+Faecalibacterium
+Haemosporida
+Haemosporidia
+Oestridae
+Oestrinae
+Haematococcus pluvialis
+Paeduderus
+Haemulidae
+Haemodoraceae
+Sulphuricurvum
+Sulphurimonas
+Desulphovibrio
+Thermodesulphobacterium
+Leuconostoc mesenteroides
+Leucothrix
+Aerobacter aerogenes
+Gynaecotyla
+Coelomomyces
+Paedophryne amauensis
+Paedocypris progenetica
+Haementeria ghilianii
+Haemopis sanguisuga
+Haemopis
+Haemadipsa
+Aegypius monachus
+Aeluropus
+Caesalpinia
+Caesalpiniaceae
+Caesalpinia pulcherrima
+# drugs (fp2.txt)
+leucovorin
+Leucovorin calcium
+levoleucovorin
+sulfamethoxazole
+sulfasalazine
+sulfadiazine
+sulfonylurea
+estradiol
+estrogen
+ethinyl estradiol
+fesoterodine
+hemin
+Panhematin
+heparin
+enoxaparin
+haloperidol
+paliperidone
+paclitaxel
+aerosolized albuterol
+aerosol
+Haemate P
+Haemocomplettan
+Humate-P
+Haemaccel
+Paedialyte
+Pedialyte
+colestipol
+coenzyme Q10
+Coelenterazine
+coelenterazine
+Aerius
+aerobika
+fluorouracil
+leucine
+isoleucine
+leucovorin rescue
+hemoglobin A1c
+Haemoccult
+Hemoccult
+Faecalibacterium-based
+Valium
+favipiravir
+labetalol
+Colorado
+vigabatrin
+honvan
+humira
+Humulin
+tumor
+colorectal
+odorless
+# places (fp3.txt)
+Paoli, Pennsylvania
+Aetna
+Caesars Palace
+Caesars Entertainment
+Caesar salad
+Caesar Chavez
+Cesar Chavez
+Aemilia
+Phoebe
+Aeneas
+Aesop
+Caesarea Maritima
+Caesarea Philippi
+Oedipus
+Oedipus complex
+Oedipal
+Paean
+Michaelangelo
+Haemus
+Honolulu
+Colorado Springs
+Valdosta
+Savannah
+Harbor Springs
+Humboldt
+Labadie
+Tumwater
+Odessa
+Fernandina
+Centreville, Virginia
+Centreville, Maryland
+Rockefeller Center
+Pearl Harbor
+Fulton
+Valparaiso
+Rigby, Idaho
+Vigo County
+Vapor Lake
+Greybull, Wyoming
+Greyhound
+Greystone Park Psychiatric Hospital
+Greystone
+Kerby, Oregon
+# journals, books, titles (fp4.txt)
+Lancet Haematol
+Br J Haematol
+Haematologica
+Archives of Disease in Childhood
+Acta Paediatrica
+Acta Haematologica
+Br J Anaesth
+A Clockwork Orange
+National Institute for Health and Care Excellence
+World Health Organization
+The Journal of Bone and Joint Surgery
+Journal of the American Medical Association
+New England Journal of Medicine
+Annals of Internal Medicine
+Morbidity and Mortality Weekly Report
+Pediatrics
+Anesthesiology
+Hematology
+Gynecologic Oncology
+Lancet Gastroenterol Hepatol
+The Lancet Child & Adolescent Health
+Journal of Labor Economics
+Pharmacology Research & Perspectives
+Aging Cell
+# American scientific/common words (fp5.txt)
+aerial
+aerobic
+anaerobic
+aerosol
+aeration
+aerodynamic
+aerospace
+academia
+coelacanth
+coelom
+coelomic
+coelenterate
+onomatopoeia
+paean
+peony
+Caesar
+caesura
+archaeology
+archaeal
+Archaea
+paleontology
+aesthetic
+anesthesia
+amoeba
+amoebic
+encyclopedia
+hemoglobin
+estrus
+diestrus
+proestrus
+anestrus
+estrous cycle
+fetal
+fetus
+feces
+fecal
+gynecology
+celiac
+cesarean
+etiology
+diarrhea
+apnea
+dyspnea
+sulfur
+homeostasis
+leukocyte
+leukopenia
+pedagogy
+pediatric
+pedophile
+pedestrian
+pedal
+pedometer
+paedomorphosis
+paedogenesis
+paedomorphic
+hemal
+hemoglobinemia
+septicemia
+anemia
+ischemia
+hyperemia
+uremia
+bacteremia
+viremia
+leukemia
+hypoxemia
+academic
+academies
+Aemilius
+Aemilian
+algae
+larvae
+vertebrae
+formulae
+antennae
+pupae
+nebulae
+alumnae
+personae
+sequelae
+fistulae
+maculae
+aorta
+tracheae
+aeolian
+Aeolus
+Michael
+Raphael
+Israel
+Israeli
+Ishmael
+Rachael
+Gael
+Gaelic
+maelstrom
+phenomena
+Phoenix
+phoenix
+Phoebe
+amphoe
+oboe
+shoe
+canoe
+does
+toes
+goes
+heroes
+poem
+poet
+poetry
+Zoe
+Chloe
+aloe
+aloe vera
+coed
+coerce
+coefficient
+coexist
+coenzyme
+Joe
+foe
+foes
+woe
+whoever
+however
+homeowner
+homeopathy
+homeostatic
+fetor
+feta
+fetish
+fetch
+Faeroe
+estrange
+estrogenic
+estrone
+pestrol
+destroyer
+pressure
+centrifuge
+center
+fibroblast
+metric
+metro
+metropolis
+liter
+meter
+theater
+spectrum
+calibrate
+calibration
+fiber
+somber
+saber
+goiter
+meager
+ocher
+skeptic
+practice
+practicing
+licensed
+license
+offense
+defense
+pretense
+analyze
+catalyze
+paralyze
+dialysis
+hemodialysis
+dialyzer
+analyst
+analysis
+analyses
+catalyst
+paralysis
+electrolysis
+hydrolysis
+cancellation
+excelled
+controlled
+fulfilled
+enrolled
+installed
+installation
+distilled
+distillation
+appalling
+enthralling
+tranquillity
+modeled
+modeling
+traveled
+traveler
+labeled
+labeling
+counselor
+counseling
+fueled
+signaled
+signaling
+leveled
+totaled
+canceled
+canceling
+channeled
+paneled
+paneling
+rivaled
+dialed
+dialing
+equaled
+initialed
+initialing
+marvelous
+jeweler
+jewelry
+# code identifiers, third party (fp6.txt)
+color: darkgrey;
+color: lightgrey;
+background: slategrey;
+fill: dimgrey
+from sklearn.preprocessing import normalize
+np.linalg.norm
+import colorsys
+colorama.init()
+curses.has_colors()
+pd.DataFrame.style.background_gradient
+plt.colorbar()
+self.assertCountEqual(a, b)
+locale.normalize("en_US")
+unicodedata.normalize("NFC", s)
+window.addEventListener("resize", f)
+element.scrollIntoView({behavior: "smooth"})
+canvas.getContext("2d").fillStyle
+str.capitalize()
+SelectorEventLoop
+from typing import Literal
+CSS: text-rendering: optimizeLegibility;
+"@media (prefers-color-scheme: dark)"
+pixi run check-spelling
+oauth2 authorize endpoint
+Authorization: Bearer x
+HTTP_X_FORWARDED_FOR
+crypto.subtle.digest("SHA-256", data)
+color-mix(in srgb, red, blue)
+https://www.bmj.com/content/colour/behaviour
+https://en.wikipedia.org/wiki/Haemophilus_influenzae
+see https://example.org/paediatric-guidelines.
+(https://example.com/haematology)
+<https://example.com/colour>
+[link](https://nice.org.uk/guidance/ng143/chapter/Recommendations#paediatric)
+[link](../docs/colour.md)
+[link](./colour.md)
+[link](/colour/behaviour)
+see docs/colour.md for details
+see colour.md for details
+www.paediatrics.org
+nice.org.uk/guidance/paediatric
+example.com/haematology
+mailto:paediatrics@nhs.net
+paediatrics@example.org
+git@github.com:org/colour-tools.git
+file:///home/me/colour.txt
+s3://bucket/colour/data.csv
+ftp://host/behaviour
+urn:isbn:colour
+doi:10.1111/j.1365-2141.haematology
+10.1111/bjh.haematology
+https://doi.org/10.1111/haem.14000
+@import url("https://fonts.googleapis.com/css2?family=Colour+Sans");
+<link href="https://fonts.googleapis.com/css2?family=Inter" rel="stylesheet">
+background: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==);
+<img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciLz4=">
+<img src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg'><title>colour</title></svg>">
+src: url(data:font/woff2;base64,d09GMgABAAAAAAXXcolourQAoAAAAAC2gAAAWMAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGhYbHhwgBmAAgjIRCAqEOIM1ATYCJAMKCwYABCAFhGoHIBsWBlGUcAoMaHaemFaecalGreyhaem)
+integrity="sha384-oqVuAfXRKap7fdgcCY5uykM6+R9GqQ8K/uxy9rx7HNQlGYl1kPzQho1wx4JwY8wC"
+integrity="sha512-Haem0/AbcdEfColourBehaviourxyz=="
+data-hash="ZmFlY2Vz"
+token: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJoYWVtIn0.HaemFaecPaedSulphxyz
+base64: aGVsbG8gY29sb3VyIGJlaGF2aW91cg==
+const blob = "QmVoYXZpb3VyIGNvbG91cg==AbHaemoglobin";
+uuid 9faec3d1-0000-4000-8000-0000haem0000
+sha256:faecb1a2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e
+commit 3faec12
+hex color #faec00
+color: #FAEC00;
+--accent: #aeoe;
+<svg viewBox="0 0 10 10"><path d="M0 0L10 10"/></svg>
+fill="url(#haemGradient)"
+# proper names of people/orgs (fp7.txt)
+Kim Haemin
+Haemin Sunim
+Lee Haemi
+Haemi Kim
+Park Hae-mi
+Haemin Kim, MD
+Sung Haeun
+Aedan
+Caelan Moore
+Michael Oestreich
+Oestreich
+Oestreicher
+Oesterle
+Gloria Oesterreich
+Jennifer Paedae
+Faeq Ahmed
+Haemmerle
+Haemmerli
+Paeder
+Joe Sulphen
+Colourpop Cosmetics
+HonorHealth
+Endeavor Health
+Kennedy Center
+Lincoln Center
+Haemonetics Corporation
+Haemonetics
+Sulfur Springs
+Pfizer
+Aetna
+Caesars
+Oedipus Rex
+Rhaegar
+Daenerys
+Caelius Aurelianus
+Aemilius Paullus
+Faenza
+Faeroese
+Aerith
+Paeonia lactiflora
+Gaea
+Aeschylus
+Michaelis-Menten
+Kaempferol
+kaempferol
+Haeckel
+Ernst Haeckel
+Haemer
+Saegusa
+Oechsner
+Foettinger
+Foetisch
+Coelho
+Paulo Coelho
+Coehlo
+Oedekerk
+Sulphin
+Paedersen
+# word forms, prefixes and look-alikes (fp8.txt)
+phytoestrogen
+phytoestrogens
+Phytoestrogens in soy
+xenoestrogen
+xenoestrogens
+mycoestrogen
+metalloestrogen
+neuroestrogen
+proestrus
+proestrous
+Proestrus
+metestrus
+alphaemission
+alphaemitter
+betaemission
+alphaembedding
+infoetl
+photoetching
+videoedema
+pizzaemoji
+sophiaemr.com
+estrogenic
+anti-estrogen
+antiestrogen
+pseudoestrogen
+endoestrogen
+hydroxyestradiol
+ethinylestradiol
+coestrogen
+spermiogenesis
+hematocrit
+microhematuria
+pedopathy
+anesthetist
+encyclopedic
+# binomials as markup and prose write them (fp9.txt)
+*Enterococcus faecalis*
+<i>Enterococcus faecalis</i>
+<em>S. haemolyticus</em>
+_E. faecalis_
+**Mannheimia haemolytica**
+*Enterococcus* *faecalis*
+<i>Enterococcus</i> <i>faecalis</i>
+Enterococcus	faecalis
+Enterococcus&nbsp;faecalis
+Enterococcus faecalis's
+E.faecalis
+E . faecalis
+vancomycin-resistant Enterococcus faecalis (VRE)
+Enterococcus (E.) faecalis
+Enterococcus faecalis/faecium
+E. faecalis and faecium
+E. faecalis and E. faecium
+faecalis
+faecium
+haemolyticus
+haemolytica
+"Enterococcus faecalis"
+Enterococcus faecalis, Enterococcus faecium
+Staphylococcus aureus and S. haemolyticus
+S. aureus, S. epidermidis, S. haemolyticus
+Haemophilus influenzae and H. parainfluenzae
+[Enterococcus faecalis](#ref)
+`E. faecalis`
+Enterococcus faecalis ATCC 29212
+enterococcus faecalis
+ENTEROCOCCUS FAECALIS
+Bacteroides vulgatus
+Neisseria gonorrhoeae infection
+gonorrhoeae
+Schistosoma haematobium eggs

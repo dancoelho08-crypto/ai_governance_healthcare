@@ -1,8 +1,24 @@
-# Phrases check_spelling.py skips. One per line; a line containing the phrase is
-# exempt. Only for words this project does not control: a quotation, a third-party
-# license, or an identifier defined by someone else's API. Never for our own prose.
+# Phrases check_spelling.py skips, as `glob: phrase`, one per line. The phrase is
+# exempt, matched exactly and case-sensitively, only in files the glob matches
+# (matched from the right, like PurePath.match), and the rest of its line is
+# still checked. Only for words this project does not control: a quotation, a
+# third-party license, or an identifier defined by someone else's API. Never for
+# our own prose. A glob of `*` matches every file; say why one is needed.
 
 # GitHub Actions' own spelling. `cancelled()` is a status-check function and
 # 'cancelled' is the value in `needs.<job>.result`; neither can be respelled.
-cancelled()
-'cancelled'
+# The cost of scoping by file: in a workflow, these two phrases are exempt
+# everywhere, including our own comments, so a comment there that writes either
+# one is not caught. Only the exact phrase is exempt; the rest of the line, and
+# the bare word, are still checked.
+.github/workflows/*.yml: cancelled()
+.github/workflows/*.yml: 'cancelled'
+
+# Python's own spelling: asyncio.CancelledError is the standard library's
+# exception class, and the name cannot be respelled.
+*.py: CancelledError
+
+# Python asyncio: Future.cancelled() and Task.cancelled() are the standard
+# library's methods. Only the method call is exempt (a dot before it), and only
+# in Python files: the word in a comment or a docstring is still checked.
+*.py: .cancelled()

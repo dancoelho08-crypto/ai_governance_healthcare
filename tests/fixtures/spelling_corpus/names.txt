@@ -1,0 +1,106 @@
+# Names, titles and code from the verifier's corpus (#169) holding a capitalized
+# British word. Each may be reported, but --fix must leave every line as
+# written: a capitalized word may be a name. Lines starting with '# ' are comments.
+# organisms (fp1.txt)
+Oestrus ovis
+Oestrus spp.
+# drugs (fp2.txt)
+Sulphasalazine
+Faecal Immunochemical Test
+Caesarean
+Paediatric
+# places (fp3.txt)
+Sulphur, Oklahoma
+Sulphur Springs, Texas
+White Sulphur Springs, West Virginia
+Sulphur, Louisiana
+Sulphur, LA
+Sulphur, OK
+Sulphur Springs
+Sulphur Creek
+Sulphur Mountain
+Sulphur Bank Rancheria
+Centre County, Pennsylvania
+Centre Hall
+Centre College
+Centre, Alabama
+Penn State Centre County
+Theatre Square
+Harbour Island
+Colour Springs
+Honour Heights Park
+Lustre, Montana
+Mould Bay
+Grey Eagle, Minnesota
+Greys River
+Grey's Anatomy
+Zane Grey
+Earl Grey
+Lady Jane Grey
+Joel Grey
+Jennifer Grey
+Grey Gardens
+Fifty Shades of Grey
+Storey County, Nevada
+Mould
+# journals, books, titles (fp4.txt)
+The Lancet Haematology
+British Journal of Haematology
+Paediatric and Perinatal Epidemiology
+Journal of Paediatrics and Child Health
+Anaesthesia
+British Journal of Anaesthesia
+Anaesthesia and Intensive Care
+European Journal of Anaesthesiology
+Journal of Obstetrics and Gynaecology Canada
+BJOG: An International Journal of Obstetrics and Gynaecology
+Australian and New Zealand Journal of Obstetrics and Gynaecology
+Paediatric Respiratory Reviews
+Diseases of the Oesophagus
+Haemophilia
+Thrombosis and Haemostasis
+Journal of Thrombosis and Haemostasis
+Encyclopaedia Britannica
+Encyclopaedia of Islam
+The Colour Purple
+Colour Me Kubrick
+Behaviour Research and Therapy
+Animal Behaviour
+Journal of Organisational Behavior
+Centre for Evidence-Based Medicine
+Oxford Centre for Evidence-Based Medicine
+Cochrane Centre
+Organisation for Economic Co-operation and Development
+NHS Programme
+Journal of Paediatric Surgery
+Behaviour Change
+Labour Economics
+Tumour Biology
+Harbour of Tears
+Paediatrics and Child Health
+Colour Research and Application
+Faecal Microbiota Transplantation guideline
+Theatre Journal
+Journal of Aetiology
+Ageing Research Reviews
+Age and Ageing
+Ageing & Society
+Mechanisms of Ageing and Development
+Journal of Ageing Studies
+# code identifiers, third party (fp6.txt)
+ANALYSE VERBOSE my_table;
+VACUUM ANALYSE;
+# proper names of people/orgs (fp7.txt)
+Grey Gustafson
+Harbour Group
+Honour Health
+Valour Credit Union
+Savour
+Humour
+Rumour Has It
+Endeavour Health
+Lexington Centre
+Grey Bruce Health
+Grey Nuns Hospital
+Grey Sloan Memorial
+Sulphur Medical

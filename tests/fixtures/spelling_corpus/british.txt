@@ -1,0 +1,64 @@
+# British spellings from the verifier's corpus (#169), each as 'line  =>  the
+# line --fix makes of it', read as a Markdown file. Each must be found, and
+# fixed to exactly that; a line --fix leaves (code, or a word found by its
+# shape) is its own fix. Lines starting with '# ' are comments.
+# British words listed among the drugs (fp2.txt)
+oestradiol valerate  =>  estradiol valerate
+leucocyte  =>  leukocyte
+haemoglobin A1c  =>  hemoglobin A1c
+# British words listed among the American ones (fp5.txt)
+toxaemia  =>  toxemia
+haemal arch  =>  hemal arch
+oestrus  =>  estrus
+litre  =>  liter
+spectre  =>  specter
+sceptre  =>  scepter
+modeller  =>  modeler
+# British words in code of our own (fp6.txt): reported, and fixed only where
+# the word stands alone
+primary: grey  =>  primary: gray
+accent: blue grey  =>  accent: blue gray
+color: grey;  =>  color: gray;
+const centreX = 0;  =>  const centreX = 0;
+OPTIMISE_FLAG  =>  OPTIMISE_FLAG
+# word forms, prefixes and look-alikes (fp8.txt)
+dioestrus  =>  diestrus
+antioestrogen  =>  antiestrogen
+oestrogenicity  =>  estrogenicity
+haematocrit  =>  hematocrit
+microhaematuria  =>  microhematuria
+anaesthetist  =>  anesthetist
+encyclopaedic  =>  encyclopedic
+encyclopaedist  =>  encyclopedist
+# Found by their shape, not listed: reported, never fixed (the verifier's third
+# pass)
+haematoxylin  =>  haematoxylin
+haemopericardium  =>  haemopericardium
+haematogenous  =>  haematogenous
+oesophagogastroduodenoscopy  =>  oesophagogastroduodenoscopy
+foetoplacental  =>  foetoplacental
+gynae  =>  gynae
+acidaemia  =>  acidaemia
+isovolaemic  =>  isovolaemic
+otorrhoea  =>  otorrhoea
+eupnoea  =>  eupnoea
+hectolitres  =>  hectolitres
+paediatrist  =>  paediatrist
+# Made up by the verifier as a clean look-alike; its -aemia ending is a British
+# shape now, so it is reported (and never rewritten)
+macaemia  =>  macaemia
+# Moved from unlisted.txt when their stems were listed
+foetid  =>  fetid
+caesium  =>  cesium
+# Moved from unlisted.txt when segments were matched inside a word: found by
+# their shape, never suggested
+leucoderma  =>  leucoderma
+leucoplakia  =>  leucoplakia
+leucotriene  =>  leucotriene
+# After a capitalized word, which once silenced them as possible epithets;
+# a listed word there is suggested
+Severe oedema  =>  Severe edema
+NHS haemovigilance  =>  NHS haemovigilance
+# An abbreviation with dots is not a file extension
+oedema/e.g. swelling  =>  oedema/e.g. swelling
+anaemia/i.e. low Hb  =>  anaemia/i.e. low Hb

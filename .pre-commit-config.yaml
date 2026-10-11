@@ -64,13 +64,22 @@ repos:
       # shared with this project used a Cyrillic o in "who"; that class of
       # substitution is invisible in review and breaks search and anchors.
       # American English only. The word list lives in the script; a quoted
-      # British spelling is exempted with `spelling-ok` on the line or an
-      # entry in .spelling-allow.
+      # British spelling is exempted with `spelling-ok` on the line or a
+      # `glob: phrase` entry in .spelling-allow.
       - id: check-spelling
         name: check for British spellings
         entry: pixi run check-spelling
         language: system
         types: [text]
+
+      # The spelling guard's own tests, whenever the checker, its allowlist, its
+      # tests or its corpus change. A check never shown to fail is a claim (#169).
+      - id: test-check-spelling
+        name: test the spelling guard
+        entry: pixi run test-check-spelling
+        language: system
+        pass_filenames: false
+        files: '^(scripts/check_spelling\.py|\.spelling-allow|tests/test_check_spelling\.py|tests/fixtures/spelling_corpus/.*)$'
 
       # The message catalogs: same keys, placeholders and plural forms as en.json,
       # no markup, and every key used (#80).

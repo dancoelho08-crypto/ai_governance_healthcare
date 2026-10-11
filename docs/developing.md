@@ -378,7 +378,10 @@ In short:
   values to SQL as parameters and never in the SQL text. `pixi run test-injection`
   poisons every string in a project and audits every screen and export,
   `pixi run check-injection` refuses new ways of turning text into markup, and a
-  server test fails on SQL built at run time.
+  server test fails on SQL built at run time. `pixi run test-markdown-render`
+  renders the Markdown export with markdown-it-py (CommonMark and GFM, raw HTML
+  refused and passed through) and audits the HTML, so the Markdown is checked
+  as a reader's renderer reads it and not only as text.
   The page-policy and injection suites run in Chromium by default; set
   `TEST_BROWSER=firefox` or `webkit` to run them in another engine (CI runs
   both, because each engine enforces the policy itself). An unknown value is an
@@ -387,7 +390,49 @@ In short:
   that asserts a security property gets a row in [Security claims](security-claims.md)
   with the test that enforces it, and `pixi run check-claims` fails if a quoted
   sentence is no longer where the row says it is.
-- **American English** everywhere, checked by `pixi run check-spelling`.
+- **American English** everywhere, checked by `pixi run check-spelling`. It
+  lists British roots, medical ones among them, generates their inflections,
+  and matches listed words only whole, reading identifiers word by word
+  (camelCase and SHOUTING_CASE). It also reports a lowercase word that holds a
+  British medical segment anywhere in it, such as
+  haem, oedem or -aemia. <!-- spelling-ok -->
+  It reports every hit whatever word stands before it, except a true Latin
+  epithet after its genus: a word with a Latin ending that is not an English
+  medical form (-ia, -oea, -oma, -itis, -sis), not a listed word but for the
+  one listed epithet, and not one of a closed list of English nouns that look
+  Latin ("caecum", "haemoperitoneum" <!-- spelling-ok -->
+  and four more), so a British medical word after a genus is still reported.
+  The genus is a name on a closed list, or one capital and a period that
+  starts the text or follows whitespace, and that does
+  not follow Dr, Hep, Group, Twin, Fig, Appendix or one of the other words the
+  checker lists, so "T. foetus" passes <!-- spelling-ok -->
+  and "Twin A. foetus" does not. <!-- spelling-ok -->
+  A listed true epithet ("haemophilum",
+  "haemolysans") passes wherever it stands, and
+  "sulphur" is always reported, <!-- spelling-ok -->
+  the butterfly's name too.
+  Words with an accented letter, URLs, email addresses, domains, file names,
+  paths and encoded data are skipped.
+  **Nothing rewrites your files.** `pixi run fix-spelling` prints a patch of
+  suggested respellings on stdout, under a header saying it is a suggestion,
+  and lists on stderr every other hit for you to fix by hand, with the reason
+  it has no suggestion; it exits 1 when there is any hit. Read every hunk, drop
+  what is wrong, and apply the rest from the repository root with
+  `pixi run fix-spelling > spelling.patch` and `git apply spelling.patch`. The
+  patch suggests only a listed, all-lowercase word in a `.md`, `.rst` or `.txt`
+  file or a value of `app/i18n/en.json`, outside code, standing alone between
+  whitespace and punctuation, so its misreadings are rare, but it is still a
+  suggestion. A quotation or a name keeps its spelling with `spelling-ok` on
+  the line, or with a `glob: phrase` entry in `.spelling-allow`, which exempts
+  that exact phrase only in the files the glob matches, and not the rest of its
+  line. Run with no arguments, it reads every text file, as the pre-commit hook
+  does. A file named twice on the command line is read once, a symbolic link
+  to a file stands for its target, and a link to no file is said to be skipped
+  and makes the exit 1.
+  `fix-spelling` cannot name a file outside the repository given by an
+  absolute path or with "..", because `git apply` refuses such a path: it says
+  so and leaves that file's suggestions out of the patch.
+  `pixi run test-check-spelling` shows the checker failing.
 
 ## The documentation site
 

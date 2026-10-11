@@ -222,7 +222,11 @@ def actionlint_missing(workflow: dict) -> list[str]:
 
 
 ENGINES_JOB = "engines"
-ENGINE_SUITES = ("pixi run test-csp", "pixi run test-injection")
+ENGINE_SUITES = (
+    "pixi run test-csp",
+    "pixi run test-injection",
+    "pixi run test-markdown-render",
+)
 OTHER_ENGINES = {"firefox", "webkit"}
 
 

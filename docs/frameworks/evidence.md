@@ -43,7 +43,7 @@ The headline numbers are sobering:
 | | |
 |---|---|
 | Published AI ethics frameworks identified | at least **173** |
-| Studies of frameworks actually operationalised | **16** |
+| Studies of frameworks actually operationalized | **16** |
 
 Of those 16, the review found three ways frameworks get used: establishing
 governance structures (4), pre-implementation ethical review (8), and
