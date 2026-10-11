@@ -238,6 +238,9 @@ jobs:
       - name: the page says when its server retires records by other rules
         if: ${{ !cancelled() }}
         run: pixi run test-rules-banner
+      - name: a refused save is sent once, kept, and explained
+        if: ${{ !cancelled() }}
+        run: pixi run test-save-refused
       - name: user ids become people
         if: ${{ !cancelled() }}
         run: pixi run test-people

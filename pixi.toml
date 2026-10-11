@@ -116,6 +116,7 @@ test-people = "python tests/test_people.py"
 test-session-ui = "python tests/test_session_ui.py"
 # The banner when the server retires records by other rules than the page's (#168, D-83).
 test-rules-banner = "python tests/test_rules_banner.py"
+test-save-refused = "python tests/test_save_refused.py"
 # The dashboard reports each export it produces, in the server-backed mode (#33).
 test-export-beacon = "python tests/test_export_beacon.py"
 # Every export says which storage mode produced it, in the header's own words (#93).
