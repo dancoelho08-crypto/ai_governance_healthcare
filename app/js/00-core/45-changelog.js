@@ -67,6 +67,10 @@ function describeValue(path, value) {
    this tool can render a better diff from old entries. */
 function logChange(pid, path, from, to, doc) {
   if (RO) return;
+  // A record stored before credentials were removed on entry (R-70) can still hold
+  // some; the history must not copy them. A copy, so the record is not touched.
+  from = scrubAddressCredentials(from && typeof from === "object" ? clone(from) : from).value;
+  to = scrubAddressCredentials(to && typeof to === "object" ? clone(to) : to).value;
   const same = JSON.stringify(from ?? null) === JSON.stringify(to ?? null);
   if (same) return;   // a save that changed nothing is not a change
 

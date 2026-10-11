@@ -263,6 +263,9 @@ jobs:
       - name: evidence references are links and fingerprints, never the file
         if: ${{ !cancelled() }}
         run: pixi run test-refs
+      - name: credentials in an address are removed on entry, import and export
+        if: ${{ !cancelled() }}
+        run: pixi run test-address-credentials
       - name: notes take a Markdown subset and nothing that carries markup
         if: ${{ !cancelled() }}
         run: pixi run test-markdown

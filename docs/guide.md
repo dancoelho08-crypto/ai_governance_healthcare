@@ -74,6 +74,15 @@ the text they are, and a link opens only if it is an http or https address. The
 text is stored exactly as you typed it (the JSON export carries it unchanged),
 and the HTML, PDF and Markdown reports are written from the same reading of it.
 
+**Credentials are removed from addresses.** If you type or paste an address with
+a user name or password in it, such as `https://user:pass@host/` or
+`http://user@host`, in any field, the dashboard keeps the rest of the address,
+removes the credentials and tells you with a message that does not repeat them.
+The same is done to a project you import, and the Markdown report leaves them
+out even of a record that already holds them. It does not change the record that
+is stored, so the JSON export still carries what was saved before this rule;
+remove it there if it matters.
+
 ### Evidence references
 
 Under a criterion's notes (CHAI or OPTICA) you can add **evidence references**:
