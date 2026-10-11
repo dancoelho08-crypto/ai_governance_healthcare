@@ -141,13 +141,15 @@ function openHoldDialog(action){
   host.addEventListener("click", e => { if(e.target === host) close(); });
   document.addEventListener("keydown", onKey);
   go.onclick = async () => {
-    const reason = field.value.trim();
+    const cut = stripAddressCredentials(field.value.trim());
+    const reason = cut.text;
     if(!reason) return;
     go.disabled = true;
     close();
     try{
       await STORE.setHold(CUR, action, reason);
       toast(t(placing ? "toast.holdPlaced" : "toast.holdLifted"));
+      if(cut.removed) setTimeout(() => toast(t("toast.credsRemoved")), 2600);  // after the first has been read
     }catch(e){ toast(t("toast.holdFailed")); }
     fillHold();
   };

@@ -34,6 +34,64 @@ function safeUrl(raw){
   return u.href;
 }
 
+/* ---- Credentials in an address (R-70, D-88) ------------------------------
+   A Markdown or GitHub-style renderer turns a bare https://user:pass@host/ in a
+   value into a link, so a password typed into any field would be printed in the
+   report and offered as a click. safeUrl() above refuses such an address as a
+   reference; this removes the credentials from an address wherever text is
+   typed, pasted, imported or written to the Markdown report, and leaves the rest.
+
+   What counts: the userinfo ("user:pass@" or "user@") of an address that has a
+   scheme and "://", whatever the scheme (a renderer links http, https and ftp
+   bare, and any scheme in angle brackets), and of a protocol-relative "//". The
+   userinfo runs to the LAST "@" before the first "/", "?" or "#", as in the URL
+   standard, so https://host/path?email=a@b.c keeps its "@" and
+   https://a@b@host/ loses both. Removed even when nothing follows the "@": a
+   person typing it one character at a time has not typed the host yet.
+   Not credentials: user:pass@host with no scheme (no renderer links it) and an
+   email address. The URL parser is the test's oracle, not a dependency: it
+   refuses a half-typed address that this must still clean. */
+const AddrRule = Object.freeze({ SCHEME: "scheme", RELATIVE: "relative" });
+const ADDR_SCHEME = "[A-Za-z][A-Za-z0-9+.\\-]{0,31}";
+const ADDR_USERINFO = "[^\\s/?#<>]*@";
+const ADDR_RULES = Object.freeze([
+  Object.freeze({ rule: AddrRule.SCHEME, re: new RegExp(`(${ADDR_SCHEME}://)${ADDR_USERINFO}`, "g") }),
+  Object.freeze({ rule: AddrRule.RELATIVE, re: new RegExp(`(^|[^:/\\w])(//)${ADDR_USERINFO}`, "g") }),
+]);
+
+/* The text without the credentials of any address in it: {text, removed}, where
+   removed counts addresses cleaned. Pure, and idempotent: the userinfo runs to the
+   last "@", so cutting it cannot leave another for a second pass to find. */
+function stripAddressCredentials(text){
+  let out = String(text ?? "");
+  let removed = 0;
+  for(const {rule, re} of ADDR_RULES){
+    out = out.replace(re, (m, a, b) => {
+      removed++;
+      switch(rule){
+        case AddrRule.SCHEME: return a;
+        case AddrRule.RELATIVE: return a + b;
+        default: return assertNever(rule);
+      }
+    });
+  }
+  return {text: out, removed};
+}
+
+/* The same for every string inside a value, in place (a record, a reference, an
+   imported file): {value, removed}. Keys are not text and are left alone. */
+function scrubAddressCredentials(v, depth = 0){
+  if(typeof v === "string"){ const r = stripAddressCredentials(v); return {value: r.text, removed: r.removed}; }
+  if(!v || typeof v !== "object" || depth > 64) return {value: v, removed: 0};
+  let removed = 0;
+  for(const k of Object.keys(v)){
+    if(!safeKey(k)) continue;   // an own "__proto__" or "constructor" is never written through
+    const r = scrubAddressCredentials(v[k], depth + 1);
+    if(r.removed){ v[k] = r.value; removed += r.removed; }
+  }
+  return {value: v, removed};
+}
+
 const newRefId = () => "r" + Date.now().toString(36).slice(-6) + Math.random().toString(36).slice(2, 8);
 
 /* Whatever is stored, as a clean list: unknown or malformed entries are dropped

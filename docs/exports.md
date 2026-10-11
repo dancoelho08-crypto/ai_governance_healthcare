@@ -85,6 +85,14 @@ with CommonMark and GFM renderers, with raw HTML passed through as well as refus
 and audits the HTML that comes out; it does not run GitHub's own renderer or a
 particular editor's preview.
 
+An address in a value never keeps its credentials in the Markdown report: a user
+name and password in an address such as `https://user:pass@host/`, which a
+Markdown renderer turns into a link, are left out of the report even when the
+record holds them, and the dashboard removes them when they are typed or
+imported (R-70). The JSON export is the saved record itself and the CSV is a list
+of values, so neither changes: a credential saved before this rule is still in
+them.
+
 What a person types becomes formatting or a link in two places only: the [notes
 and rationale fields](guide.md#formatting-notes), which take bold, italic, lists
 and http(s) links, and the address of an [evidence

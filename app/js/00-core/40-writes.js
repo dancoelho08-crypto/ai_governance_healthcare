@@ -97,8 +97,15 @@ function setLocal(path,val){
   for(let i=0;i<ks.length-1;i++){ if(o[ks[i]]==null||typeof o[ks[i]]!=="object") o[ks[i]]={}; o=o[ks[i]]; }
   o[ks[ks.length-1]]=val;
 }
+/* Every typed, pasted or programmatic write of a field comes through here, so this
+   is where credentials in an address are removed (R-70): before the value is
+   stored, queued for the server or described in the history. Returns the value
+   stored, so a text field can show what it holds. */
 function edit(path,val){
-  if(!String(path).split(".").every(safeKey)) return;  // never a write to a prototype
+  if(!String(path).split(".").every(safeKey)) return val;  // never a write to a prototype
+  const cleaned = scrubAddressCredentials(val && typeof val === "object" ? clone(val) : val);
+  val = cleaned.value;
+  if(cleaned.removed) toast(t("toast.credsRemoved"));
   const before = path.startsWith("metrics.") ? clone(S.metrics) : clone(get(path));
   setLocal(path,val);
   let patch;
@@ -117,6 +124,7 @@ function edit(path,val){
   // controls, because a list would need extending every time a control is
   // added, and the one that got missed would silently stop logging.
   if(!TYPING) flushChanges(CUR, path);
+  return val;
 }
 
 /* Changelog coalescing.
@@ -249,6 +257,7 @@ async function createProject(data,logText){
   // A new record would follow rules this page does not show (D-83).
   if(rulesBlockWrites()){ toast(t("rules.refused")); return null; }
   const id=newId();
+  scrubAddressCredentials(data);  // the callers that tell the person do it first; this is the net (R-70)
   try{
     await STORE.create(id,data);
     // Goes through the same queue as every other entry, so a transient

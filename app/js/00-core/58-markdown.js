@@ -118,7 +118,7 @@ function mdHTML(source){
 
 /* ---- Markdown ------------------------------------------------------- */
 const MD_SPECIAL = /[\\`*_\[\]()<>|!~]/g;
-const mdEscape = s => String(s).replace(MD_SPECIAL, c => "\\" + c);
+const mdEscape = s => stripAddressCredentials(String(s)).text.replace(MD_SPECIAL, c => "\\" + c);  // credentials never reach the report (R-70)
 const MD_URL_ESCAPE = Object.freeze({ "<": "%3C", ">": "%3E", "(": "%28", ")": "%29" });
 
 function mdRunMarkdown(nodes, joiner){
@@ -140,7 +140,9 @@ function mdRunMarkdown(nodes, joiner){
 /* On one line, for a table cell or a bullet: blocks and list items run
    together with a visible separator, never a newline. */
 function mdInlineMarkdown(source){
-  return mdParse(source).map(b => {
+  // The raw text first (a link's address can only be seen there), then every run
+  // again in mdEscape, where a backslash escape has been resolved (R-70).
+  return mdParse(stripAddressCredentials(String(source ?? "")).text).map(b => {
     switch(b.block){
       case MdBlock.PARA: return mdRunMarkdown(b.inline, " ");
       case MdBlock.UL: case MdBlock.OL: return b.items.map(i => "• " + mdRunMarkdown(i, " ")).join(" ");

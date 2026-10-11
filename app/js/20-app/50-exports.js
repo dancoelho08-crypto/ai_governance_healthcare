@@ -84,7 +84,10 @@ function exportMD(){
   // backslash itself goes first: escaping only the pipe turned a value's own `\|` into
   // an escaped backslash and a live pipe that ends the cell (#124). A viewer that
   // renders HTML would otherwise run a colleague's markup (#155).
-  const line=s=>String(s??"").replace(/[\r\n\u2028\u2029]+/g," ").replace(/[\\`*_\[\]()<>|!~]/g,c=>"\\"+c);
+  // And an address loses its credentials first (R-70): a renderer links a bare
+  // https://user:pass@host/ and would print the password in the report. Done on
+  // the text, after the newlines are gone, so the stored record is not touched.
+  const line=s=>stripAddressCredentials(String(s??"").replace(/[\r\n\u2028\u2029]+/g," ")).text.replace(/[\\`*_\[\]()<>|!~]/g,c=>"\\"+c);
   const nm=id=>displayName(id), named={name:line(fw.name)};
   const fieldLine=(labelKey,value)=>t("md.fieldLine",{label:t(labelKey),value:line(value)});
   const shown=(map,v)=>v?(Object.hasOwn(map,v)?t(map[v]):v):"–";

@@ -75,6 +75,7 @@ test-audit = "python tests/test_audit_log.py"
 # Free-text fields opt out of browser spellcheck and form history (#59).
 test-text-fields = "python tests/test_text_fields.py"
 test-refs = "python tests/test_refs.py"
+test-address-credentials = "python tests/test_address_credentials.py"
 test-framework-boundary = "python tests/test_framework_boundary.py"
 # The checklist pages are their definitions, byte for byte, and the built app agrees (#168).
 test-framework-docs = "python tests/test_framework_docs.py"
