@@ -1039,6 +1039,29 @@ honest answer and is a gap worth closing; see R-19.
   undecided and its Art. 30 draft leaves the field to be filled in.
 - Source: #57.
 
+### R-69 Which CHAI criteria do OPTICA 5.3 and 7.4 cite?
+
+- Status: Open
+- docs/crosswalk.md moves OPTICA 5.3 and 7.4 from OPTICA-only to partial, but
+  names no CHAI criterion for either. The page narrows them: 5.3 cites exactly
+  one of s2-1, s2-2, s3-2, s3-4, s4-6 or s6-3 (s6-3 would also add CHAI stage
+  s6 to chapter 5's stage set, which the page lists as s2; s1 s3 s4); 7.4 cites
+  from s3-1, s3-2 and s4-3. The owner has decided (2026-10-10) to leave both
+  unresolved for now.
+- Until answered: OPTICA's definition keeps 5.3 and 7.4 OPTICA-only with no
+  criteria, so the dashboard shows them as not covered by CHAI, and the page
+  says so in its section 7, citing this entry. Do not record a criterion for
+  either, and do not write documentation or UI copy that names one.
+- When answered: record the criteria in `app/frameworks/optica/framework.json`
+  and take both items out of the page's "not yet recorded" sentence.
+  `pixi run check-crosswalk` accepts that sentence only while this entry's status
+  is Open, so answering it without recording them fails the check.
+- Source: docs/crosswalk.md (sections 1 and 2); the owner's answer in the #174
+  session (2026-10-10); DECISIONS D-84.
+- Enforced by: `scripts/gen_crosswalk.py --check` (`pixi run check-crosswalk`) and
+  `tests/test_crosswalk.py`, which shows the check failing when this entry is
+  answered while the items are still unrecorded.
+
 ### R-61 Evidence is referenced, never uploaded
 
 - Status: Active

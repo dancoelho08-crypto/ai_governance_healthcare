@@ -19,6 +19,16 @@ class GateClass(StrEnum):
     RETIRE = "retire"
 
 
+class CrossRefRelation(StrEnum):
+    """How far an item's crossRefs reach the other framework's: an item's
+    ``crossRefs.relation``. Here, not in check_framework.py, because
+    scripts/gen_crosswalk.py checks docs/crosswalk.md by it too (#174)."""
+
+    EQUIVALENT = "equivalent"
+    PARTIAL = "partial"
+    OPTICA_ONLY = "optica-only"
+
+
 # The classes that end a project: the engine's phase() calls a project Stopped or
 # Retired when any of its gates holds an option of one of these classes, and the
 # server starts its retention clock then (R-56, R-66).

@@ -34,6 +34,8 @@ from typing import Any
 
 import asyncpg
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.requests import ClientDisconnect
@@ -368,6 +370,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await db.close()
 
 
+def _encodable(value: Any) -> Any:
+    """``value`` with every lone surrogate in a string or key written out as text."""
+    if isinstance(value, str):
+        return value.encode("utf-8", "backslashreplace").decode("utf-8")
+    if isinstance(value, dict):
+        return {_encodable(k): _encodable(v) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        return [_encodable(v) for v in value]
+    return value
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Build the app. Taking settings as an argument is what makes it testable."""
     settings = settings or Settings.from_env()
@@ -528,6 +541,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "such as the NUL character (U+0000)."
             },
         )
+
+    @app.exception_handler(RequestValidationError)
+    async def invalid_request(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        """FastAPI's own 422, with the echoed input made encodable (#187).
+
+        Its handler returns each error's ``input``, the value that failed, and JSON
+        text holding a lone surrogate (which the parser accepts) cannot be written as
+        UTF-8, so a request that failed validation and carried one answered 500. The
+        surrogate is escaped to its text (backslashreplace, as the fingerprint does),
+        here, once, for every route.
+        """
+        errors = jsonable_encoder(exc.errors())
+        return JSONResponse(status_code=422, content={"detail": _encodable(errors)})
 
     @app.exception_handler(Exception)
     async def unhandled(request: Request, exc: Exception) -> JSONResponse:

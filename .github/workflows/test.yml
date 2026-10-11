@@ -66,6 +66,11 @@ jobs:
       - run: pixi run check-framework
       - run: pixi run test-check-framework
 
+      # docs/crosswalk.md agrees with OPTICA's definition, and the check is shown
+      # failing on each way the two could drift apart (#174).
+      - run: pixi run check-crosswalk
+      - run: pixi run test-crosswalk
+
       # The showcase video on the docs site: present, under its size cap,
       # first-party, and honest about which mode it shows.
       - run: pixi run test-docs-media

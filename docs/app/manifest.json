@@ -29,8 +29,8 @@
     {
       "id": "optica",
       "role": "supplement",
-      "version": "1",
-      "sha256": "0491c30943bf7763d67d9c606f02109121c8f6a5ac90b1551da5e5eb7649cdf5",
+      "version": "2",
+      "sha256": "6c9c21257edfa72d2f8b88affad77479188d6721576ca2704bf9539d70d2012c",
       "retire": []
     }
   ],

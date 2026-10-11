@@ -32,9 +32,16 @@ lint-py-fix = "ruff check --fix ."
 format-py = "ruff format ."
 # Generated artifacts. `gen-docs` regenerates everything derived from the
 # framework definitions (app/frameworks/<id>/framework.json), then rebuilds the dashboard.
-gen-docs = { depends-on = ["gen-framework-docs", "gen-te-page", "build-app"] }
+gen-docs = { depends-on = ["gen-framework-docs", "gen-crosswalk", "gen-te-page", "build-app"] }
 # docs/frameworks/<id>-checklist.md, one per definition (#168, D-75).
 gen-framework-docs = "python scripts/gen_framework_docs.py"
+# docs/crosswalk.md's item table, from OPTICA's definition; check-crosswalk also
+# checks every count and correction the page states about the current mapping
+# against it (#174, D-84; its section 7 says what is not checked).
+gen-crosswalk = "python scripts/gen_crosswalk.py"
+check-crosswalk = "python scripts/gen_crosswalk.py --check"
+# check-crosswalk shown failing: the definition and the page, each broken one way at a time.
+test-crosswalk = "python tests/test_crosswalk.py"
 gen-chai-metrics = "python scripts/gen_chai_metrics.py"
 gen-te-page = "python scripts/gen_te_page.py"
 

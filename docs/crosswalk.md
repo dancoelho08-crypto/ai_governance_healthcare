@@ -178,13 +178,14 @@ other seven are scattered through chapters 3, 4 and 7.
 
 **Chapter 7 (performance) is the most structurally awkward.** Twelve items,
 six answerable only by the vendor and six only by the adopter, spanning four
-completion stages and six CHAI criteria across three CHAI stages. It is also
+completion stages and ten CHAI criteria across four CHAI stages. It is also
 where the clock conflict in section 5 does the most damage.
 
-**Chapters 3, 4 and 5 touch CHAI widely but shallowly.** They cite nine, nine
-and seven distinct criteria respectively, yet almost every mapping carries
-substantial residue, because CHAI documents data at dataset level while OPTICA
-works per cohort rule, per variable and per label.
+**Chapters 3, 4 and 5 touch CHAI widely but shallowly.** They cite five, nine
+and seven distinct criteria respectively (chapter 5's seven counts the one
+criterion 5.3 reaches, which section 7 explains is not yet recorded), yet almost
+every mapping carries substantial residue, because CHAI documents data at
+dataset level while OPTICA works per cohort rule, per variable and per label.
 
 ## 3. Where each framework is alone
 
@@ -335,9 +336,10 @@ including the role-dual MLOps ones, and ten through both. So the dependency
 runs in both directions, but asymmetrically: a vendor cannot hand you a CHAI
 file, and you cannot assemble one without the vendor.
 
-**No chapter can be completed by one party.** Chapter 4 splits five-five
-between vendor and adopter, chapter 5 three-three, chapter 7 six-six, chapter
-3 five-one and chapter 11 two-two-two across vendor, dual and adopter. The
+**Of the seven chapters the vendor answers in, only chapter 6 can be completed
+by one party.** Chapter 4 splits five-five between vendor and adopter, chapter
+5 three-three, chapter 7 six-six, chapter 3 five-one, chapter 8 two-one and
+chapter 11 two-two-two across vendor, dual and adopter. The
 natural unit of exchange is therefore not a chapter and not a domain but the
 individual item, which is precisely the granularity at which cross-framework
 reuse is most expensive to administer.
@@ -486,6 +488,115 @@ construction, the vendor's evidence base including its negatives, and the
 portfolio judgment. Those 16 are the reason to run OPTICA, not an overhead on
 top of CHAI.
 
+## 7. Item by item
+
+Each OPTICA item's relation to CHAI and the CHAI criteria it cites, exactly as
+OPTICA's framework definition records them. This is the data the dashboard's
+"covered by CHAI" chips and the [OPTICA checklist](frameworks/optica-checklist.md)
+are drawn from. Where an item cites more than one criterion, the first listed
+is the one its chip shows. The table is written from the definition by
+`scripts/gen_crosswalk.py`, and `pixi run check-crosswalk` fails if the table
+disagrees with the definition, or if most counts, lists and corrections this
+page states about the current mapping do (#174). A few sentences are found by a
+looser search and may be reworded without the check noticing. That covers
+the relations, the criteria cited and who answers each item, and how they add
+up by CHAI stage, by chapter and by completion stage. It does not cover what
+cannot be derived from the definition: the previous pass's figures (checked by
+`tests/test_crosswalk.py` against a record of that pass), the coverage grades,
+the history of the audit, and the reviewer's grading of each criterion as
+reached, touched or absent, which is checked only for agreeing with itself
+and with what is cited.
+
+Two items are not yet recorded there: 5.3 and 7.4 are partial on this page, but
+this page does not name the CHAI criteria they reach, so the definition still
+marks them OPTICA-only and the dashboard shows them as not covered by CHAI.
+Which criteria they cite is an open question for the owner (R-69 in
+REQUIREMENTS.md, #174).
+
+<!-- Generated from app/frameworks/optica/framework.json by scripts/gen_crosswalk.py (pixi run gen-crosswalk). Do not edit by hand. -->
+
+| Item | Who answers | Relation to CHAI | CHAI criteria |
+| ---- | ----------- | ---------------- | ------------- |
+| 1.1 | adopter | partial | s1-1, s1-4 |
+| 1.2 | adopter | partial | s1-2, s1-3 |
+| 1.3 | adopter | partial | s2-1, s2-2, s2-5 |
+| 1.4 | adopter | partial | s2-2 |
+| 1.5 | adopter | partial | s1-3, s2-4 |
+| 1.6 | adopter | partial | s1-3, s6-6, s5-3 |
+| 2.1 | adopter | partial | s1-2 |
+| 2.2 | adopter | OPTICA-only | — |
+| 2.3 | adopter | OPTICA-only | — |
+| 3.1 | developer | partial | s3-1 |
+| 3.2 | developer | OPTICA-only | — |
+| 3.3 | developer | partial | s3-2 |
+| 3.4 | developer | OPTICA-only | — |
+| 3.5 | developer | partial | s3-2, s2-3 |
+| 3.6 | adopter | partial | s4-1, s1-4, s3-2 |
+| 4.1 | developer | partial | s3-1 |
+| 4.2 | developer | OPTICA-only | — |
+| 4.3 | developer | partial | s2-2, s2-1 |
+| 4.4 | developer | partial | s3-4 |
+| 4.5 | developer | partial | s3-4 |
+| 4.6 | adopter | OPTICA-only | — |
+| 4.7 | adopter | partial | s1-7, s4-1 |
+| 4.8 | adopter | partial | s2-7, s4-4 |
+| 4.9 | adopter | partial | s4-1, s6-1 |
+| 4.10 | adopter | partial | s3-1 |
+| 5.1 | developer | partial | s2-4 |
+| 5.2 | developer | partial | s3-1 |
+| 5.3 | developer | OPTICA-only | — |
+| 5.4 | adopter | partial | s1-1 |
+| 5.5 | adopter | partial | s4-1, s1-3 |
+| 5.6 | adopter | partial | s4-3, s2-4 |
+| 6.1 | developer | OPTICA-only | — |
+| 6.2 | developer | OPTICA-only | — |
+| 6.3 | developer | OPTICA-only | — |
+| 6.4 | developer | OPTICA-only | — |
+| 6.5 | developer | partial | s3-3, s4-2 |
+| 6.6 | developer | partial | s2-1, s1-1 |
+| 7.1 | developer | partial | s4-3 |
+| 7.2 | developer | partial | s4-2 |
+| 7.3 | developer | partial | s3-1, s3-2 |
+| 7.4 | developer | OPTICA-only | — |
+| 7.5 | developer | OPTICA-only | — |
+| 7.6 | developer | OPTICA-only | — |
+| 7.7 | adopter | partial | s1-3 |
+| 7.8 | adopter | OPTICA-only | — |
+| 7.9 | adopter | partial | s1-7, s4-1 |
+| 7.10 | adopter | partial | s4-4 |
+| 7.11 | adopter | partial | s4-1 |
+| 7.12 | adopter | partial | s5-2, s5-3 |
+| 8.1 | developer | OPTICA-only | — |
+| 8.2 | developer | partial | s4-6 |
+| 8.3 | adopter | partial | s4-6 |
+| 9.1 | adopter | partial | s1-7 |
+| 9.2 | adopter | partial | s5-6, s1-7 |
+| 9.3 | adopter | partial | s4-7, s2-7 |
+| 9.4 | adopter | partial | s1-7, s3-6 |
+| 10.1 | adopter | partial | s2-2, s2-1 |
+| 10.2 | adopter | partial | s2-1, s5-2 |
+| 10.3 | adopter | partial | s2-5, s1-6 |
+| 10.4 | adopter | partial | s4-6 |
+| 10.5 | either | partial | s2-7, s4-5 |
+| 10.6 | either | partial | s4-5 |
+| 10.7 | either | partial | s3-4, s2-7 |
+| 11.1 | developer | partial | s6-3 |
+| 11.2 | developer | partial | s6-3 |
+| 11.3 | either | partial | s6-1, s3-7 |
+| 11.4 | either | partial | s6-1, s6-4 |
+| 11.5 | adopter | partial | s6-3 |
+| 11.6 | adopter | partial | s6-1, s6-2, s3-7 |
+| 12.1 | adopter | partial | s1-3 |
+| 12.2 | adopter | partial | s5-3, s5-5, s1-3, s6-6 |
+| 12.3 | adopter | partial | s5-1 |
+| 12.4 | adopter | partial | s5-2, s6-6 |
+| 12.5 | adopter | partial | s6-3, s2-6 |
+| 13.1 | adopter | OPTICA-only | — |
+| 13.2 | adopter | partial | s1-2, s1-6 |
+| 13.3 | adopter | OPTICA-only | — |
+
+<!-- End of the generated table. -->
+
 ## How this page was produced
 
 The crosswalk was built by mapping each of the 77 OPTICA items onto canonical
@@ -501,5 +612,6 @@ uncovered CHAI criteria) were wrong in both directions and are not used here.
 
 The underlying data is committed as OPTICA's framework definition,
 [`app/frameworks/optica/framework.json`](https://github.com/tonyreina/ai_governance_healthcare/blob/main/app/frameworks/optica/framework.json),
-and the per-item view is generated from it onto the
+apart from the two items named in section 7. The per-item view is generated
+from it into section 7 and onto the
 [OPTICA checklist](frameworks/optica-checklist.md) page.

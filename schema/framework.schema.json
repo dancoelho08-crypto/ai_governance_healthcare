@@ -132,7 +132,7 @@
                   "required": ["framework", "relation", "ids"],
                   "properties": {
                     "framework": {"$ref": "#/$defs/id"},
-                    "relation": {"enum": ["equivalent", "partial", "optica-only"], "description": "CrossRefRelation in scripts/check_framework.py."},
+                    "relation": {"enum": ["equivalent", "partial", "optica-only"], "description": "CrossRefRelation in scripts/framework_enums.py. equivalent and partial name at least one item in ids; optica-only names none (scripts/check_framework.py)."},
                     "ids": {"type": "array", "items": {"$ref": "#/$defs/id"}, "uniqueItems": true}
                   }
                 }

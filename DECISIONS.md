@@ -2237,7 +2237,127 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
   `tests/test_stack.py` checks the real stack's page shows no banner. Claim
   C-95.
 
-### D-85 A save the server refused is not retried, and says why
+### D-84 The crosswalk is checked against OPTICA's definition
+
+- Status: Proposed (built for #174; the owner has not yet confirmed it)
+- **The problem.** docs/crosswalk.md described the reviewed, corrected crosswalk
+  (0 equivalent, 61 partial, 16 OPTICA-only, 36 CHAI criteria cited) while OPTICA's
+  definition, which the dashboard's "covered by CHAI" chips and the generated
+  OPTICA checklist are drawn from, still held the earlier pass (3 equivalent, 60
+  partial, 14 OPTICA-only, 35 cited, no s3-7). Nothing connected the two, so the
+  page, the checklist and the app disagreed for as long as the data existed.
+- **The data follows the page.** The definition now records every change the
+  page states (its "Corrections applied", the 7.1 and 7.2 rulings, the s2-7 and
+  role-dual extensions, and the producer reassignments of 1.4, 11.3, 11.4 and
+  11.6). Nothing was inferred: the page is the reviewed source, and only what
+  it says was copied.
+- **The page's item table is generated.** `scripts/gen_crosswalk.py` writes
+  section 7 of the page (each item's who answers, relation and CHAI criteria)
+  from the definition, between two markers, as part of `pixi run gen-docs`. The
+  per-item view on the page is the definition, so it cannot drift.
+- **The prose is checked.** `pixi run check-crosswalk` reads every count, list
+  and named correction the page states about the current mapping and recomputes
+  each from the definition: the headline relations, the criteria cited and never
+  cited and the one gained over the previous pass, the stage and chapter tables,
+  the chapter sentences (chapter 7's shape, the criteria chapters 3, 4 and 5
+  cite, which chapters one party can complete and how each splits), corrections
+  applied and rejected, the producer split and who the adopting organization's
+  items are assigned to, the relay of completion stages and the stages it puts
+  s3-7, s6-3 and 12.1 at, the most-cited criterion, the items that keep or lose
+  a mapping, and the whole-checklist totals named in passing. Most of these are
+  read by pattern, and a numeric claim reworded so its pattern no longer
+  matches is a failure. Some sentences are found by a looser search, and
+  rewording one of those (naming a different item, or changing a number the
+  pattern does not capture) is not noticed: the check is a tripwire for the
+  counts and lists on the page, not proof that every sentence is true. It
+  also checks the OPTICA checklist's "There are no *equivalent* rows"
+  (`app/frameworks/optica/docs.toml`), which stops being checked if that
+  sentence is reworded. The page's item-by-item attributions in prose (which
+  item supplies which criterion in the section 3 and section 6 lists) are not
+  checked; some of them disagree with the definition and are tracked in the
+  follow-up issue.
+- **What the check cannot derive, and so does not claim.** The reviewer's
+  grading of each CHAI criterion as reached, touched or absent is not in the
+  definition. The check holds it to itself and to what is cited: the stage
+  table, the two section 3 tables (with each criterion's track, from CHAI's
+  definition) and the section 6 lists must agree, grade every criterion once,
+  and never grade an uncited criterion reached. The previous pass's figures are
+  checked by `tests/test_crosswalk.py` against the record of that pass
+  (`tests/fixtures/optica_crossrefs_before_174.json`). The coverage grades and
+  the audit's history are not checked. Section 7 of the page says exactly this.
+  The verifier on #174 found two chapter sentences false under the earlier,
+  unchecked prose (chapter 3 cites five criteria, not nine; chapter 7 ten
+  criteria across four CHAI stages, not six across three), and a third ("No
+  chapter can be completed by one party": chapters 1, 2, 6, 9, 12 and 13 can
+  be); all three are corrected from the data and now checked.
+- **Reviewed but not recorded.** The page moves 5.3 and 7.4 from OPTICA-only to
+  partial without naming the CHAI criteria they reach. A partial with no
+  criteria would show in the app as "No CHAI criterion covers this", so the
+  definition keeps them OPTICA-only and the page says so in section 7, citing
+  the open question R-69. The check reads them as the page's relation, requires
+  the definition to still hold them unrecorded (so recording them means
+  removing them from that sentence), and checks the counts their criteria could
+  change (chapter 5's and chapter 7's) as lower bounds. It accepts the sentence
+  only while R-69, which it reads from REQUIREMENTS.md, is under Open questions,
+  has the status Open and names the same items: once the owner answers R-69,
+  the check fails until they are recorded. The owner decided on 2026-10-10 to
+  leave both unresolved (R-69).
+- **A relation and its ids agree.** `scripts/check_framework.py` requires an
+  equivalent or partial crossRef to name at least one item and an OPTICA-only
+  one to name none, so the definition cannot record a partial the chip would
+  show as not covered. `check-crosswalk` also requires every crossRef to name
+  CHAI, the framework OPTICA requires, since it reads every id as a CHAI
+  criterion.
+- **The order of an item's ids matters.** The dashboard's chip shows the first
+  criterion an item lists and names the rest in its tooltip, so the first is
+  the item's lead anchor. The order is the definition's, and the page's
+  generated table states it; reordering an item's ids leaves the table stale and
+  `check-crosswalk` fails until it is regenerated, which makes the new chip a
+  reviewed change. `tests/test_optica.py` checks, in a browser, that each chip
+  shows the first id its definition lists.
+- **OPTICA's definition is version "2".** Its mappings changed, so its
+  `version` moved from "1" to "2". The version is read only by the build
+  manifest (`docs/app/manifest.json`, which the server's retirement rules
+  read as text); the record's stamp names only the framework id, so no stored
+  record or export changes.
+- **The residue text is not maintained.** Each OPTICA item's `attrs.residue`
+  (what OPTICA asks beyond CHAI) came with the earlier pass. Nothing displays
+  it: not the dashboard, the generated checklist or the crosswalk page. It is
+  empty for 1.1, 9.3 and 12.1 and was written for the earlier relation of 3.2,
+  6.3, 7.5 and 8.1. It was left as it is rather than rewritten, because the
+  page does not supply the text and none is invented here (the only edit is
+  the spelling "rigour" to "rigor" in 12.2's, under R-17). Anything that starts
+  to show it must first bring it up to date.
+- **Rejected:** generating the whole page from the definition (its argument is
+  prose, written by a reviewer, not data); hand-maintaining a second per-item
+  table on the page (two copies, the failure #174 already was); parsing only the
+  headline numbers (a changed criterion id would pass whenever the counts
+  happened to hold); guessing 5.3's and 7.4's criteria from the chapter table's
+  totals (the page constrains them but does not name them); recording 5.3 and
+  7.4 as partial with no ids (the chip would say "not covered" while the data
+  said partial, which the new coherence rule now refuses); claiming on the page
+  that "every count" is checked while the reached/touched/absent grading cannot
+  be (softened to what is checked, and that grading checked for consistency).
+- Source: #174; the #168 coupling map that found it; docs/crosswalk.md; the
+  verifier's findings on the #174 branch; the owner's answer on 5.3 and 7.4
+  (2026-10-10, R-69).
+- Enforced by: `pixi run check-crosswalk` (pre-commit and CI) and
+  `tests/test_crosswalk.py` (`pixi run test-crosswalk`, CI's workflows job): the
+  committed page and definitions agree; the original #174 disagreement, from a
+  fixture of the earlier pass, is found; one relation, one criterion id added,
+  removed or swapped, one "who answers", an equivalence back and a
+  not-yet-recorded item recorded are each caught in the definition, with the
+  table stale and with it regenerated; a headline count, an id or relation in
+  the table, the never-cited list, a citation fix, a chapter count, the
+  producer split, a reworded claim, the markers and the "not yet recorded"
+  sentence are each caught on the page, as is each countable prose sentence
+  (the two false chapter sentences restored among them); R-69 answered, removed
+  or naming other items is caught; a crossRef to another framework is caught.
+  `tests/test_check_framework.py` (`pixi run test-check-framework`) shows the
+  coherence rule failing (9.1 partial with no ids, 2.2 OPTICA-only with s1-2).
+  `tests/test_optica.py` (`pixi run test-app`) checks each chip in a browser.
+
+### D-86 A save the server refused is not retried, and says why
 
 - Status: Proposed (the retry rule is the owner's request on #186; the
   classification below, and what a refusal keeps and says, are this change's,
@@ -2261,6 +2381,11 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
   it with `textContent` (never markup) and lasts longer than the usual toast. The
   reason is English, as server messages are (R-55); the sentence around it is
   translated.
+- **Limit, stated:** a refused edit stays in `pending`, so the next save of that
+  project sends it again, merged with the new edit, and is refused again until the
+  person corrects the field. Correcting the same field overwrites the bad value,
+  which is the intent; an unrelated edit made first is held back by the same
+  refusal until then. The message names the server's reason each time.
 - **Rejected:** retrying a 4xx a few times "in case" (it never succeeds and delays
   the message by the whole backoff); dropping the edit on refusal (the person
   loses what they typed, which #186 and the comment on `flush()` exist to prevent);

@@ -91,6 +91,24 @@ repos:
         pass_filenames: false
         files: '^app/frameworks/|^app/frameworks\.json$|^app/i18n/en\.json$|^schema/framework|^scripts/check_framework|^scripts/framework_enums\.py$'
 
+      # docs/crosswalk.md against OPTICA's definition: its item table is the
+      # definition's, and every count and correction it states about the current
+      # mapping holds (#174, D-84).
+      # The check and its mutation tests, whenever the page, a definition, the
+      # checker or REQUIREMENTS.md (the open question R-69) changes.
+      - id: check-crosswalk
+        name: check the crosswalk page against OPTICA's definition
+        entry: pixi run check-crosswalk
+        language: system
+        pass_filenames: false
+        files: '^(docs/crosswalk\.md|REQUIREMENTS\.md|scripts/(gen_crosswalk|framework_enums)\.py)$|^app/frameworks/(optica|chai)/'
+      - id: test-crosswalk
+        name: test the crosswalk check
+        entry: pixi run test-crosswalk
+        language: system
+        pass_filenames: false
+        files: '^(docs/crosswalk\.md|REQUIREMENTS\.md|scripts/(gen_crosswalk|framework_enums)\.py|tests/test_crosswalk\.py|tests/fixtures/optica_crossrefs_before_174\.json)$|^app/frameworks/(optica|chai)/'
+
       # The checker's own mutation tests, whenever it, the schema or a definition changes.
       - id: test-check-framework
         name: test the framework definition checker

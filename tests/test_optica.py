@@ -2,21 +2,27 @@
 """End-to-end checks for the OPTICA framework in a real browser.
 
 Covers the properties the crosswalk analysis says must hold: OPTICA is off by
-default, switching it on adds exactly 14 views and 77 items, answers persist
-through a disable/enable cycle, and -- the one that matters most -- an OPTICA
-answer never moves a CHAI score.
+default, switching it on adds exactly 14 views and 77 items, each item's chip
+shows the first CHAI criterion its definition lists (or "not covered" for none),
+answers persist through a disable/enable cycle, and -- the one that matters
+most -- an OPTICA answer never moves a CHAI score.
 
     pixi run test-app
 """
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-APP = Path(__file__).resolve().parent.parent / "docs" / "app" / "index.html"
+ROOT = Path(__file__).resolve().parent.parent
+APP = ROOT / "docs" / "app" / "index.html"
+OPTICA_DEF = json.loads(
+    (ROOT / "app" / "frameworks" / "optica" / "framework.json").read_text("utf-8")
+)
 
 FREEZE = """
 (() => {
@@ -81,6 +87,41 @@ def run() -> list[str]:
         check(
             "item keys are dot-free",
             page.evaluate("ENGINES.optica.items.every(i => !i.id.includes('.'))"),
+        )
+
+        # #174: each item's chip shows the first CHAI criterion its definition
+        # lists, and names them all; an item with none (5.3 and 7.4 among them,
+        # not yet recorded, R-69) shows as not covered.
+        wrong: list[str] = []
+        for section in OPTICA_DEF["sections"]:
+            page.evaluate(f"go('o{section['n']}')")
+            page.wait_for_timeout(100)
+            chips = page.evaluate(
+                "Object.fromEntries([...document.querySelectorAll('li[data-item]')]"
+                ".map(li => { const c = li.querySelector('.ci-row .pchip');"
+                " return [li.dataset.item, c ? [c.textContent, c.title] : null]; }))"
+            )
+            for it in section["items"]:
+                ids = (it.get("crossRefs") or {}).get("ids") or []
+                got = chips.get(it["num"].replace(".", "-"))
+                if got is None:
+                    wrong.append(f"{it['num']}: no chip")
+                elif ids and (got[0] != ids[0] or not all(i in got[1] for i in ids)):
+                    wrong.append(f"{it['num']}: {got} for {ids}")
+                elif not ids and got[0] != "—":
+                    wrong.append(f"{it['num']}: {got} for no criterion")
+        check("each chip shows the item's first CHAI criterion", not wrong, str(wrong))
+        not_covered = page.evaluate("t(FACADES.optica.slot(UiSlot.NOT_COVERED))")
+        page.evaluate("go('o5')")
+        page.wait_for_timeout(100)
+        chip = page.query_selector('li[data-item="5-3"] .ci-row .pchip')
+        check(
+            "5.3, not yet recorded, shows as not covered by CHAI",
+            chip is not None
+            and chip.text_content() == "—"
+            and chip.get_attribute("title") == not_covered,
+            f"{chip and (chip.text_content(), chip.get_attribute('title'))}"
+            f" vs {not_covered!r}",
         )
 
         # Answer an item, then assert CHAI is untouched.

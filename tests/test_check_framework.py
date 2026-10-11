@@ -947,8 +947,43 @@ def main() -> int:
     found = run(equivalent_empty)
     check(
         "an equivalent crossRef that names no item",
-        any("equivalent crossRef names no item" in line for line in found),
+        any("crossRef relation 'equivalent' names no item" in line for line in found),
         str(found[:3]),
+    )
+
+    # A relation and its ids must agree (#174): a partial with no criteria shows
+    # in the dashboard as "not covered", and an OPTICA-only item citing one
+    # contradicts itself.
+    def optica_item(o: dict, num: str) -> tuple[str, dict]:
+        for si, section in enumerate(o["sections"]):
+            for ii, it in enumerate(section["items"]):
+                if it["num"] == num:
+                    return f"$.sections[{si}].items[{ii}].crossRefs.ids", it
+        raise KeyError(num)
+
+    path, it = optica_item(REAL[OPTICA], "9.1")
+    check(
+        "9.1 is partial with criteria in the real definition",
+        it["crossRefs"]["relation"] == "partial" and it["crossRefs"]["ids"],
+    )
+    notices(
+        "a partial crossRef that names no item (9.1 with [])",
+        lambda c, o: optica_item(o, "9.1")[1]["crossRefs"].update(ids=[]),
+        OPTICA,
+        path,
+        "crossRef relation 'partial' names no item",
+    )
+    path, it = optica_item(REAL[OPTICA], "2.2")
+    check(
+        "2.2 is OPTICA-only with no criteria in the real definition",
+        it["crossRefs"]["relation"] == "optica-only" and not it["crossRefs"]["ids"],
+    )
+    notices(
+        "an OPTICA-only crossRef that names items (2.2 with s1-2)",
+        lambda c, o: optica_item(o, "2.2")[1]["crossRefs"].update(ids=["s1-2"]),
+        OPTICA,
+        path,
+        "crossRef relation 'optica-only' names items ['s1-2']",
     )
 
     print("Catalog keys and the sentences a screen needs (PR B1)")

@@ -42,12 +42,12 @@ to be worth adopting.*
 
 | | What it asks | Who answers | CHAI |
 |---|---|---|---|
-| **1.1** | State the specific care-delivery problem that this system is meant to address. | adopter | equivalent — `s1-1` |
+| **1.1** | State the specific care-delivery problem that this system is meant to address. | adopter | partial — `s1-1`, `s1-4` |
 | **1.2** | Describe how this task is handled today — who decides what, at which points, using which information — and spell out the harms, costs, or inefficiencies the status quo produces. | adopter | partial — `s1-2`, `s1-3` |
 | **1.3** | Lay out the revised workflow as it would run once the AI system is in place. | adopter | partial — `s2-1`, `s2-2`, `s2-5` |
-| **1.4** | Say what kind of result the system is expected to produce — generated prose, a probability or category derived from input data, or an estimate of how an outcome would shift under a given intervention — bearing in mind that each of these commits the project to a different analytic approach. | either | partial — `s2-2` |
+| **1.4** | Say what kind of result the system is expected to produce — generated prose, a probability or category derived from input data, or an estimate of how an outcome would shift under a given intervention — bearing in mind that each of these commits the project to a different analytic approach. | adopter | partial — `s2-2` |
 | **1.5** | Which performance measures actually matter for this use, and how good do the numbers have to be before adoption is defensible? Statistical or data-science input is worth soliciting here. | adopter | partial — `s1-3`, `s2-4` |
-| **1.6** | Can the gain expected from rolling this out be expressed in numbers? | adopter | partial — `s1-3`, `s6-6` |
+| **1.6** | Can the gain expected from rolling this out be expressed in numbers? | adopter | partial — `s1-3`, `s6-6`, `s5-3` |
 
 ### Chapter 2: Exploring alternative solutions
 
@@ -75,11 +75,11 @@ stand in for the people this organization would actually run it on.*
 | | What it asks | Who answers | CHAI |
 |---|---|---|---|
 | **3.1** | Identify whose records went into building the model: the eligibility and disqualification rules that bounded the cohort, plus a profile of the care environment those patients were drawn from. | developer | partial — `s3-1` |
-| **3.2** | State how many patients the development cohort contained. | developer | partial — `s3-2` |
+| **3.2** | State how many patients the development cohort contained. | developer | OPTICA only |
 | **3.3** | Summarize what that cohort looked like, reporting the spread of its principal variables the way a baseline-characteristics table would. | developer | partial — `s3-2` |
 | **3.4** | Explain the partitioning scheme that separated patients into fitting, tuning, and held-out evaluation groups. | developer | OPTICA only |
 | **3.5** | Check that each subgroup whose care could differ was represented in sufficient numbers to support a claim about it. Which subgroups matter is use-case specific, and typically includes disease severity strata, deprivation or payer status, and the usual demographic axes. | developer | partial — `s3-2`, `s2-3` |
-| **3.6** | From a clinician's standpoint, decide whether the people and care context behind the model's training and testing resemble the patients this organization would apply it to. | adopter | partial — `s4-1`, `s1-4` |
+| **3.6** | From a clinician's standpoint, decide whether the people and care context behind the model's training and testing resemble the patients this organization would apply it to. | adopter | partial — `s4-1`, `s1-4`, `s3-2` |
 
 ### Chapter 4: Input data
 
@@ -92,7 +92,7 @@ supply all of it, in the right form, at the moment of execution.*
 |---|---|---|---|
 | **4.1** | Enumerate every variable the model consumes, and for the development data describe how each was captured and how its values were spread. | developer | partial — `s3-1` |
 | **4.2** | Specify the shape and encoding in which the model requires its inputs to arrive. | developer | OPTICA only |
-| **4.3** | Pin down the moment in the care process at which the model is meant to fire, which doubles as the cutoff beyond which no input may be used. | developer | partial — `s2-2` |
+| **4.3** | Pin down the moment in the care process at which the model is meant to fire, which doubles as the cutoff beyond which no input may be used. | developer | partial — `s2-2`, `s2-1` |
 | **4.4** | Describe the treatment of absent values when the model was fitted, and prescribe how absences should be treated once it is running live. | developer | partial — `s3-4` |
 | **4.5** | Describe the treatment of out-of-range or outlying values during fitting, and the rule to apply to them in production. | developer | partial — `s3-4` |
 | **4.6** | From a clinical viewpoint, judge whether the model is being fed the information a clinician would consider essential for the job it is meant to do. | adopter | OPTICA only |
@@ -131,7 +131,7 @@ apparent quality.*
 |---|---|---|---|
 | **6.1** | Describe the modeling approach behind the solution and how it was fitted — which family of algorithm it belongs to and what the training procedure looked like. | developer | OPTICA only |
 | **6.2** | Confirm that the algorithm class chosen is a sensible match for the kind of output the solution emits. | developer | OPTICA only |
-| **6.3** | Where the solution forecasts a future event, explain how subjects whose observation ended early were treated during training, and confirm that this was handled deliberately rather than by default. | developer | partial — `s3-4` |
+| **6.3** | Where the solution forecasts a future event, explain how subjects whose observation ended early were treated during training, and confirm that this was handled deliberately rather than by default. | developer | OPTICA only |
 | **6.4** | Explain the safeguards that kept information about the outcome from contaminating the predictor variables, and confirm this risk was actively tested for rather than assumed away. | developer | OPTICA only |
 | **6.5** | Describe what was done to detect and reduce inequitable or skewed behavior across groups, and confirm the issue received deliberate attention during development. | developer | partial — `s3-3`, `s4-2` |
 | **6.6** | State whether practicing clinicians and other subject-matter specialists took part in building the solution, and in what capacity. | developer | partial — `s2-1`, `s1-1` |
@@ -147,18 +147,18 @@ outset.*
 
 | | What it asks | Who answers | CHAI |
 |---|---|---|---|
-| **7.1** | Report how well the solution scored on historical data, using measures appropriate to the kind of model it is. | developer | partial — `s4-1`, `s4-3` |
+| **7.1** | Report how well the solution scored on historical data, using measures appropriate to the kind of model it is. | developer | partial — `s4-3` |
 | **7.2** | Break those measured results down across the patient subgroups that matter clinically. | developer | partial — `s4-2` |
 | **7.3** | Characterize the dataset on which these results were measured. | developer | partial — `s3-1`, `s3-2` |
 | **7.4** | State whether the evaluation sample preserves the real-world balance of outcomes or was deliberately resampled, since rebalancing distorts any metric that depends on how common the outcome is. | developer | OPTICA only |
-| **7.5** | Report any evaluation carried out in settings beyond the one that supplied the training data, and what the results were there. | developer | partial — `s4-1` |
+| **7.5** | Report any evaluation carried out in settings beyond the one that supplied the training data, and what the results were there. | developer | OPTICA only |
 | **7.6** | Share any evidence of how the solution has behaved in live clinical use elsewhere, including where that experience comes from. | developer | OPTICA only |
 | **7.7** | Judge whether the reported results clear the metric thresholds the clinical lead specified when the need was first defined. | adopter | partial — `s1-3` |
 | **7.8** | Assess whether these results look credible and competitive when set beside the alternative solutions surveyed earlier. | adopter | OPTICA only |
 | **7.9** | Determine whether the organization's own historical records could support an in-house evaluation of the solution, and estimate what mounting one would cost in effort. | adopter | partial — `s1-7`, `s4-1` |
 | **7.10** | If an in-house retrospective test goes ahead, confirm whether the data it would consume match exactly what the live system would actually receive at runtime. | adopter | partial — `s4-4` |
 | **7.11** | Where a local retrospective test was actually carried out, give the clinical verdict on whether its results were good enough. | adopter | partial — `s4-1` |
-| **7.12** | Where a limited trial run was judged worthwhile before full rollout, summarize what it revealed about accuracy, day-to-day workability and how users received it. | adopter | partial — `s5-1`, `s5-2`, `s5-3` |
+| **7.12** | Where a limited trial run was judged worthwhile before full rollout, summarize what it revealed about accuracy, day-to-day workability and how users received it. | adopter | partial — `s5-2`, `s5-3` |
 
 ### Chapter 8: Explainability
 
@@ -169,7 +169,7 @@ and case by case, and whether those accounts stand up to clinical scrutiny.*
 
 | | What it asks | Who answers | CHAI |
 |---|---|---|---|
-| **8.1** | Identify which variables drive the model's behavior overall, or account for why such a ranking cannot be produced. | developer | partial — `s4-6` |
+| **8.1** | Identify which variables drive the model's behavior overall, or account for why such a ranking cannot be produced. | developer | OPTICA only |
 | **8.2** | State whether the solution can justify the result it produces for one specific case, and illustrate with worked examples spanning different kinds of patients. | developer | partial — `s4-6` |
 | **8.3** | Give a clinician's verdict on whether the model-wide and per-case explanations hold up medically. | adopter | partial — `s4-6` |
 
@@ -185,7 +185,7 @@ respect for privacy rules.*
 |---|---|---|---|
 | **9.1** | Establish whether the solution satisfies the regulatory rules that apply in this jurisdiction and this institution, drawing on legal counsel and the information security lead. | adopter | partial — `s1-7` |
 | **9.2** | Decide whether patients are told clearly enough that an algorithm plays a part in their care, with legal input on what disclosure is actually owed. | adopter | partial — `s5-6`, `s1-7` |
-| **9.3** | Verify that the solution meets the institution's requirements for safeguarding data and withstanding attack, with the information security lead involved. | adopter | equivalent — `s4-7` |
+| **9.3** | Verify that the solution meets the institution's requirements for safeguarding data and withstanding attack, with the information security lead involved. | adopter | partial — `s4-7`, `s2-7` |
 | **9.4** | Confirm that the solution's handling of identifiable information satisfies the privacy rules that apply locally, again with the information security lead involved. | adopter | partial — `s1-7`, `s3-6` |
 
 ## Domain D: Deployment & monitoring plan
@@ -206,7 +206,7 @@ what has to be built to serve it.*
 | **10.4** | If each result has to arrive with its rationale attached, work out how that supporting explanation gets rendered inside the host system next to the result itself. | adopter | partial — `s4-6` |
 | **10.5** | Determine whether fresh interfaces or middleware must be built to carry results from whatever serves the model over to the system that will display them. | either | partial — `s2-7`, `s4-5` |
 | **10.6** | Identify the host hardware the model will execute on and confirm its compute and memory headroom are adequate for the expected load. | either | partial — `s4-5` |
-| **10.7** | Confirm that every input feed reaches that execution environment promptly enough to be useful, and flag which feeds must arrive live rather than on a batch schedule. | either | partial — `s3-4` |
+| **10.7** | Confirm that every input feed reaches that execution environment promptly enough to be useful, and flag which feeds must arrive live rather than on a batch schedule. | either | partial — `s3-4`, `s2-7` |
 
 ### Chapter 11: Monitoring plan
 
@@ -220,10 +220,10 @@ caught rather than discovered late.*
 |---|---|---|---|
 | **11.1** | From the builder's standpoint, state the cadence at which the model has to be refreshed or refit. | developer | partial — `s6-3` |
 | **11.2** | Say whether the system refits itself automatically in the field, and if it does, describe how each refreshed version's quality gets verified before it influences care. | developer | partial — `s6-3` |
-| **11.3** | Lay out how incoming feature values will be watched for drift or outright breakage once the system is running. | adopter | partial — `s6-1` |
-| **11.4** | Lay out the equivalent watch on what the model emits, so that shifts in the distribution of its results surface early. | adopter | partial — `s6-1`, `s6-4` |
+| **11.3** | Lay out how incoming feature values will be watched for drift or outright breakage once the system is running. | either | partial — `s6-1`, `s3-7` |
+| **11.4** | Lay out the equivalent watch on what the model emits, so that shifts in the distribution of its results surface early. | either | partial — `s6-1`, `s6-4` |
 | **11.5** | From the clinical side, state how often the medical content baked into the solution - guidelines, thresholds, standards of care - needs refreshing. | adopter | partial — `s6-3` |
-| **11.6** | Set out how the solution's accuracy will keep being measured after go-live, not only before it. | either | partial — `s6-1`, `s6-2` |
+| **11.6** | Set out how the solution's accuracy will keep being measured after go-live, not only before it. | adopter | partial — `s6-1`, `s6-2`, `s3-7` |
 
 ### Chapter 12: Evaluation plan
 
@@ -234,8 +234,8 @@ measured, fed back and reported.*
 
 | | What it asks | Who answers | CHAI |
 |---|---|---|---|
-| **12.1** | Define what counts as success for this rollout - the outcome measures the deployment itself will be judged on. | adopter | equivalent — `s1-3` |
-| **12.2** | Describe the study design that will test whether the rollout genuinely helped - and whether it harmed anyone along the way. | adopter | partial — `s5-3`, `s5-5` |
+| **12.1** | Define what counts as success for this rollout - the outcome measures the deployment itself will be judged on. | adopter | partial — `s1-3` |
+| **12.2** | Describe the study design that will test whether the rollout genuinely helped - and whether it harmed anyone along the way. | adopter | partial — `s5-3`, `s5-5`, `s1-3`, `s6-6` |
 | **12.3** | Check whether the rollout itself can be structured up front - staggered, randomized, phased by site - so that its effect can later be measured credibly. | adopter | partial — `s5-1` |
 | **12.4** | Decide how you will capture what users actually think of it - perceived usefulness, friction, trust. | adopter | partial — `s5-2`, `s6-6` |
 | **12.5** | Decide who writes up the evaluation findings, how often, and to whom they go. | adopter | partial — `s6-3`, `s2-6` |

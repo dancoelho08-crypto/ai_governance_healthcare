@@ -1,0 +1,778 @@
+{
+  "_note": "OPTICA crossRefs and who answers, as app/frameworks/optica/framework.json held them before #174 was fixed (commit 255136b). tests/test_crosswalk.py shows the crosswalk check finds that disagreement.",
+  "items": {
+    "1.1": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "equivalent",
+        "ids": [
+          "s1-1"
+        ]
+      }
+    },
+    "1.2": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s1-2",
+          "s1-3"
+        ]
+      }
+    },
+    "1.3": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s2-1",
+          "s2-2",
+          "s2-5"
+        ]
+      }
+    },
+    "1.4": {
+      "who": "either",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s2-2"
+        ]
+      }
+    },
+    "1.5": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s1-3",
+          "s2-4"
+        ]
+      }
+    },
+    "1.6": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s1-3",
+          "s6-6"
+        ]
+      }
+    },
+    "2.1": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s1-2"
+        ]
+      }
+    },
+    "2.2": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "optica-only",
+        "ids": []
+      }
+    },
+    "2.3": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "optica-only",
+        "ids": []
+      }
+    },
+    "3.1": {
+      "who": "developer",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s3-1"
+        ]
+      }
+    },
+    "3.2": {
+      "who": "developer",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s3-2"
+        ]
+      }
+    },
+    "3.3": {
+      "who": "developer",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s3-2"
+        ]
+      }
+    },
+    "3.4": {
+      "who": "developer",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "optica-only",
+        "ids": []
+      }
+    },
+    "3.5": {
+      "who": "developer",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s3-2",
+          "s2-3"
+        ]
+      }
+    },
+    "3.6": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s4-1",
+          "s1-4"
+        ]
+      }
+    },
+    "4.1": {
+      "who": "developer",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s3-1"
+        ]
+      }
+    },
+    "4.2": {
+      "who": "developer",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "optica-only",
+        "ids": []
+      }
+    },
+    "4.3": {
+      "who": "developer",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s2-2"
+        ]
+      }
+    },
+    "4.4": {
+      "who": "developer",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s3-4"
+        ]
+      }
+    },
+    "4.5": {
+      "who": "developer",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s3-4"
+        ]
+      }
+    },
+    "4.6": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "optica-only",
+        "ids": []
+      }
+    },
+    "4.7": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s1-7",
+          "s4-1"
+        ]
+      }
+    },
+    "4.8": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s2-7",
+          "s4-4"
+        ]
+      }
+    },
+    "4.9": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s4-1",
+          "s6-1"
+        ]
+      }
+    },
+    "4.10": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s3-1"
+        ]
+      }
+    },
+    "5.1": {
+      "who": "developer",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s2-4"
+        ]
+      }
+    },
+    "5.2": {
+      "who": "developer",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s3-1"
+        ]
+      }
+    },
+    "5.3": {
+      "who": "developer",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "optica-only",
+        "ids": []
+      }
+    },
+    "5.4": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s1-1"
+        ]
+      }
+    },
+    "5.5": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s4-1",
+          "s1-3"
+        ]
+      }
+    },
+    "5.6": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s4-3",
+          "s2-4"
+        ]
+      }
+    },
+    "6.1": {
+      "who": "developer",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "optica-only",
+        "ids": []
+      }
+    },
+    "6.2": {
+      "who": "developer",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "optica-only",
+        "ids": []
+      }
+    },
+    "6.3": {
+      "who": "developer",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s3-4"
+        ]
+      }
+    },
+    "6.4": {
+      "who": "developer",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "optica-only",
+        "ids": []
+      }
+    },
+    "6.5": {
+      "who": "developer",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s3-3",
+          "s4-2"
+        ]
+      }
+    },
+    "6.6": {
+      "who": "developer",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s2-1",
+          "s1-1"
+        ]
+      }
+    },
+    "7.1": {
+      "who": "developer",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s4-1",
+          "s4-3"
+        ]
+      }
+    },
+    "7.2": {
+      "who": "developer",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s4-2"
+        ]
+      }
+    },
+    "7.3": {
+      "who": "developer",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s3-1",
+          "s3-2"
+        ]
+      }
+    },
+    "7.4": {
+      "who": "developer",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "optica-only",
+        "ids": []
+      }
+    },
+    "7.5": {
+      "who": "developer",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s4-1"
+        ]
+      }
+    },
+    "7.6": {
+      "who": "developer",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "optica-only",
+        "ids": []
+      }
+    },
+    "7.7": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s1-3"
+        ]
+      }
+    },
+    "7.8": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "optica-only",
+        "ids": []
+      }
+    },
+    "7.9": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s1-7",
+          "s4-1"
+        ]
+      }
+    },
+    "7.10": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s4-4"
+        ]
+      }
+    },
+    "7.11": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s4-1"
+        ]
+      }
+    },
+    "7.12": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s5-1",
+          "s5-2",
+          "s5-3"
+        ]
+      }
+    },
+    "8.1": {
+      "who": "developer",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s4-6"
+        ]
+      }
+    },
+    "8.2": {
+      "who": "developer",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s4-6"
+        ]
+      }
+    },
+    "8.3": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s4-6"
+        ]
+      }
+    },
+    "9.1": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s1-7"
+        ]
+      }
+    },
+    "9.2": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s5-6",
+          "s1-7"
+        ]
+      }
+    },
+    "9.3": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "equivalent",
+        "ids": [
+          "s4-7"
+        ]
+      }
+    },
+    "9.4": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s1-7",
+          "s3-6"
+        ]
+      }
+    },
+    "10.1": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s2-2",
+          "s2-1"
+        ]
+      }
+    },
+    "10.2": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s2-1",
+          "s5-2"
+        ]
+      }
+    },
+    "10.3": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s2-5",
+          "s1-6"
+        ]
+      }
+    },
+    "10.4": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s4-6"
+        ]
+      }
+    },
+    "10.5": {
+      "who": "either",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s2-7",
+          "s4-5"
+        ]
+      }
+    },
+    "10.6": {
+      "who": "either",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s4-5"
+        ]
+      }
+    },
+    "10.7": {
+      "who": "either",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s3-4"
+        ]
+      }
+    },
+    "11.1": {
+      "who": "developer",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s6-3"
+        ]
+      }
+    },
+    "11.2": {
+      "who": "developer",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s6-3"
+        ]
+      }
+    },
+    "11.3": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s6-1"
+        ]
+      }
+    },
+    "11.4": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s6-1",
+          "s6-4"
+        ]
+      }
+    },
+    "11.5": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s6-3"
+        ]
+      }
+    },
+    "11.6": {
+      "who": "either",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s6-1",
+          "s6-2"
+        ]
+      }
+    },
+    "12.1": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "equivalent",
+        "ids": [
+          "s1-3"
+        ]
+      }
+    },
+    "12.2": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s5-3",
+          "s5-5"
+        ]
+      }
+    },
+    "12.3": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s5-1"
+        ]
+      }
+    },
+    "12.4": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s5-2",
+          "s6-6"
+        ]
+      }
+    },
+    "12.5": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s6-3",
+          "s2-6"
+        ]
+      }
+    },
+    "13.1": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "optica-only",
+        "ids": []
+      }
+    },
+    "13.2": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "partial",
+        "ids": [
+          "s1-2",
+          "s1-6"
+        ]
+      }
+    },
+    "13.3": {
+      "who": "adopter",
+      "crossRefs": {
+        "framework": "chai",
+        "relation": "optica-only",
+        "ids": []
+      }
+    }
+  }
+}
