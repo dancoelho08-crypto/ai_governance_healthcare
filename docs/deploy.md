@@ -50,6 +50,7 @@ plain HTTP (TLS is terminated at the front door), and expects:
 | `SSE_MAX_LIFETIME_SECONDS`, `IDLE_LOCK_MINUTES`, `SIGN_OUT_URL` | Optional session controls. See [Session lifetime and automatic logoff](#session-lifetime-and-automatic-logoff). |
 | `LOG_FORMAT` | `json` (default) or `text`. See [Security events](#security-events-collecting-retaining-and-alerting). |
 | `EMERGENCY_ACCESS_IDS` | Optional. Identity ids with owner rights on every project, every use audited. See [Offboarding, and emergency access](#offboarding-and-emergency-access). |
+| `AGENT_ID_SECRET`, `AGENT_RATE_LIMIT_MAX_REQUESTS`, `AGENT_MAX_ACTIVE_TOKENS`, `AGENT_EXTRA_VALUES` | Optional. The read-only agent API is **off** until `AGENT_ID_SECRET` is set. See [The agent API](agent-api.md), which also says what to let through your front door. |
 | `RUN_MIGRATIONS` | `false` when the API serves as a restricted role, which cannot create tables. A migration job runs instead. |
 | `DATABASE_URL` | The **owner's** connection string, for the migration job only. A single-role deployment may put it here and omit the two above, which works and is reported as a weaker setup. |
 | `IDENTITY_MODE` | `iap`, `alb` or `easyauth` — which header to read. |
@@ -319,6 +320,13 @@ The id alone is what the access lists and the audit trail depend on. If the name
 and email are unwanted, the proxy can simply not assert them: the API then records
 an empty name and shows the id.
 
+Agent tokens (`agent_token`, [The agent API](agent-api.md)) hold the owner's
+identity id, an optional label they typed, when the token was made, used and
+revoked, and a hash of its secret. A token is deleted with its owner's
+`principals` row, and `make subject-access` finds it. Every agent call is also a
+row in the read trail, marked `via = 'agent'`, so what is said above about
+`access_event` covers it.
+
 ### Streaming: `/api/events`
 
 `GET /api/events` is a long-lived `text/event-stream` response. Three
@@ -348,7 +356,10 @@ under a litigation hold, so old rows go only when an operator disposes of them
 (`make dispose`). It has no
 foreign key, so it outlives the project it names, and holds ids and facts,
 never content: a list records the ids of the projects it returned, an export its
-format. The same fact is also emitted as a `record.read`, `record.exported` or
+format. A call made with an agent token ([The agent API](agent-api.md)) is a row
+too, marked `via = 'agent'` and carrying the token's public id; a refused agent
+call is one as well, with the reason. The same fact is also emitted as a
+`record.read`, `record.exported` or
 `stream.attached` security event, which is the copy a database administrator
 cannot alter.
 
@@ -448,6 +459,9 @@ recording that a project was deleted.
 | `stream.attached` | info | `actor`, `action`, `source_ip` | An event stream was opened. The read trail records it too. |
 | `record.read` | info | `actor`, `action`, `project`, `revision`, `source_ip` | A list or a read of versions or a log. One per row of the read trail. |
 | `record.exported` | info | `actor`, `action`, `project`, `format`, `source_ip` | The dashboard reported an export. |
+| `agent_token.minted` | info | `actor`, `token_id`, `expires_at` | A person minted an agent token ([Agent API](agent-api.md)). The token's public id, never its secret. |
+| `agent_token.revoked` | info | `actor`, `token_id`, `by` | A person revoked one of their own agent tokens. An operator's revocation is a row in `agent_token`, not an event: the script's output is the record. |
+| `agent.refused` | warning | `actor`, `action`, `project`, `source_ip`, `via`, `token_id`, `reason`, `route` | An agent call was refused: a token that is wrong, expired or revoked (the caller is told only that it is invalid; `reason` says which), or a project the token's user cannot see. A burst from one `source_ip` is a guesser. |
 
 The names are an interface: an alert is written against them, so a test fails if
 this table and the code ever disagree.
@@ -613,10 +627,13 @@ cryptographically verified.
 This is the first question a security review asks, so the answer is
 recorded here rather than left to be rediscovered.
 
-There is no user table, no password hash, no registration form and no
-token endpoint. Sign-in is the hospital's existing identity provider,
-and the application only ever learns who you are from the proxy in
-front of it.
+There is no user table, no password hash and no registration form.
+Sign-in is the hospital's existing identity provider, and the application
+only ever learns who you are from the proxy in front of it. The one token the
+application issues is the read-only agent token ([The agent
+API](agent-api.md)): a signed-in person mints it for themselves, it lasts
+8 hours, and it reads what their own dashboard shows on three `GET` routes and
+nothing else. It is not a way to sign in: no other route accepts it.
 
 That is a decision, not an omission. Adding local accounts — the
 `OAuth2PasswordRequestForm` pattern from the FastAPI tutorial, or
@@ -686,8 +703,27 @@ defense in depth beside closing the network, not a substitute for it.
 
 Scripts, scheduled jobs and CI are not users and should not have user
 passwords. Authenticate them at the proxy — a service account in the
-cloud front door — and leave the browser path alone. The exporters under
+cloud front door — and leave the browser path alone. For a program that
+only needs to *read* the registered statuses on a person's behalf, see
+[The agent API](agent-api.md): a per-user, 8-hour, read-only token that
+needs its path let through the front door, which that page says how to do. The
+exporters under
 `examples/` read exported JSON and need no API access at all.
+
+#### The agent API's path, and each front door
+
+The read-only agent API ([The agent API](agent-api.md)) is the one part of the API
+that a program with no single sign-on session calls. Its three `GET` routes under
+`/api/agent/` must reach the proxy **without** the front door asking for a sign-in,
+and nothing else may: `/api/agent-tokens`, which mints a token, is a person's and
+stays behind sign-on. What to do depends on the front door, and the page lists
+each (Google Cloud IAP, the AWS ALB, Azure Easy Auth, oauth2-proxy, Keycloak and
+the Compose stack's own Caddy). The summary is that a front door that
+authenticates every path and cannot be told to skip one cannot offer the agent API,
+and the API should stay off there (leave `AGENT_ID_SECRET` empty). Only the
+proxy in
+this repository is tested for the route; the rest is the platform's own documented
+behavior, and you should confirm it in your environment before relying on it.
 
 ### Plain headers versus signed assertions
 

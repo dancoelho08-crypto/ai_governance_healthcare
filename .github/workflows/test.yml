@@ -105,7 +105,8 @@ jobs:
   server:
     name: server (unit + integration, PostgreSQL 17)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The agent API's mutation tests run a copy of the server once per broken guard.
+    timeout-minutes: 25
     services:
       postgres:
         # The major version compose.yaml pins. test_workflows.py fails if the two
@@ -317,6 +318,11 @@ jobs:
       - name: proxy
         run: pixi run test-proxy
 
+      # The agent API's route in the Caddyfile: each guard (only the three GET routes,
+      # every identity header stripped, none set) broken in a copy, and noticed (#164).
+      - name: proxy, the agent route's guards
+        run: pixi run test-proxy-agent
+
       # Locked and hashed dependencies, digest-pinned images and actions, a watch for
       # updates, a security policy, and the real image built from the lock (#37).
       - name: supply chain
@@ -346,6 +352,11 @@ jobs:
       # --apply that disposes of what it reported and records who ran it (#57).
       - name: dispose
         run: pixi run test-dispose
+
+      # `make agent-tokens`: an operator lists and revokes agent tokens, as the database
+      # owner, on a real PostgreSQL (#164).
+      - name: agent tokens
+        run: pixi run test-agent-tokens
 
       # `make verify-backup`: a real dump restored into a throwaway PostgreSQL, and
       # `make restore` asking before it overwrites anything (#52).
@@ -381,6 +392,8 @@ jobs:
             echo "HTTP_PORT=8080"
             # On, so the end-to-end run exercises the shared-secret control (#61).
             echo "PROXY_SHARED_SECRET=$(openssl rand -hex 32)"
+            # On, so the end-to-end run exercises the agent API (#164).
+            echo "AGENT_ID_SECRET=$(openssl rand -base64 48)"
           } > .env
           docker compose up -d --build
           for _ in $(seq 1 60); do

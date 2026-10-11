@@ -71,6 +71,9 @@ class SecurityEvent(StrEnum):
     STREAM_ATTACHED = "stream.attached"
     RECORD_READ = "record.read"
     RECORD_EXPORTED = "record.exported"
+    AGENT_TOKEN_MINTED = "agent_token.minted"
+    AGENT_TOKEN_REVOKED = "agent_token.revoked"
+    AGENT_REFUSED = "agent.refused"
 
 
 _log = logging.getLogger(SECURITY_LOGGER)

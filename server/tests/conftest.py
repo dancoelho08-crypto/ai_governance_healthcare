@@ -162,7 +162,7 @@ async def reset_database() -> None:
         # project_version.
         await conn.execute(
             "TRUNCATE access_event, project_deletion, project_version, project_log, "
-            "projects, retention_hold, disposal_run, principals "
+            "projects, retention_hold, disposal_run, principals, agent_token "
             "RESTART IDENTITY CASCADE"
         )
         await conn.execute(

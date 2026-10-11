@@ -1424,3 +1424,223 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
   `tests/test_export_schema.py::its export's fingerprint is the stored record's`
   `tests/test_export_schema.py::an edit's history entry carries the fingerprint of what was stored`
   `tests/test_fingerprint_skip.py::all six places name the same fields`
+
+### C-97 A token is accepted on the agent routes and on no other
+
+- **Claim:** A bearer token authenticates a request only under `/api/agent/`. On
+  every other route it is not read: with no identity header the request is a 401,
+  and beside an identity header the session answers and the token is ignored. Only
+  the agent module and the rate limiter read the `Authorization` header.
+- **Asserted in:** `docs/agent-api.md` — "It is accepted under `/api/agent/` and on no other route. On every other route it is not read at all."
+- **Asserted in:** `docs/deploy.md` — "It is not a way to sign in: no other route accepts it."
+- **Status:** enforced
+- **Enforced by:**
+  `server/tests/test_agent_api.py::test_a_bearer_alone_authenticates_nobody_on_any_other_route`
+  `server/tests/test_agent_api.py::test_the_session_identity_never_reads_a_bearer`
+  `server/tests/test_agent_api.py::test_only_the_agent_module_and_the_limiter_read_a_bearer_header`
+  `server/tests/test_agent_api.py::test_the_agent_prefix_is_exactly_the_agent_routes`
+  `server/tests/test_agent_mutations.py::test_each_guard_is_noticed_when_broken`
+
+### C-98 A token cannot mint, list or revoke tokens
+
+- **Claim:** The routes that mint, list and revoke tokens take the signed-in
+  session and nothing else, so a stolen token cannot make itself a successor or end
+  its owner's other tokens.
+- **Asserted in:** `docs/agent-api.md` — "it cannot mint, list or revoke tokens (those routes take the person's signed-in session and nothing else)"
+- **Status:** enforced
+- **Enforced by:**
+  `server/tests/test_agent_api.py::test_a_token_cannot_mint_list_or_revoke_tokens`
+  `server/tests/test_agent_api.py::test_a_bearer_alone_authenticates_nobody_on_any_other_route`
+  `server/tests/test_agent_mutations.py::test_each_guard_is_noticed_when_broken`
+
+### C-99 Every bad token is one answer
+
+- **Claim:** A token that is missing, malformed, unknown, wrong, expired, revoked
+  or whose owner is gone gets the same status, the same body and the same header
+  on every agent route. Which it was is in the read trail, for the operator, and
+  nowhere in the response. (Response timing is not claimed to be equal.)
+- **Asserted in:** `docs/agent-api.md` — "and removed are the same answer: the same status, the same body, the same header."
+- **Status:** enforced
+- **Enforced by:**
+  `server/tests/test_agent_api.py::test_every_bad_token_gets_the_same_401`
+  `server/tests/test_agent_api.py::test_a_token_works_until_the_eighth_hour_and_not_after`
+  `server/tests/test_agent_api.py::test_refused_calls_are_recorded_and_say_why_to_the_operator_only`
+  `tests/test_stack.py::a token that is wrong is the uniform 401`
+
+### C-100 The identity header means nothing on an agent route
+
+- **Claim:** The identity header a front door sets is ignored on the agent
+  routes, and the proxy strips every identity header a client sends there and sets
+  none, so a client cannot choose who it is by sending one.
+- **Asserted in:** `docs/agent-api.md` — "The front door's header is ignored there, and the proxy strips it, so a client cannot choose who it is by sending one."
+- **Asserted in:** `proxy/Caddyfile` — "It is safe because of what this block does NOT do: it never sets an identity"
+- **Status:** enforced
+- **Enforced by:**
+  `server/tests/test_agent_api.py::test_the_identity_header_means_nothing_on_an_agent_route`
+  `tests/test_proxy_identity.py::no client-supplied identity header reaches the API`
+  `tests/test_proxy_identity.py::the proxy sets no identity on the agent route`
+  `tests/test_proxy_agent_mutations.py`
+
+### C-101 The proxy forwards only the three agent GET routes on that path
+
+- **Claim:** Without a single sign-on session, the proxy forwards exactly the
+  three agent GET routes and answers any other method or path under
+  `/api/agent/` with a 404 itself. Every other route is as it was: a request with
+  no signed-in identity is refused, whatever it carries.
+- **Asserted in:** `docs/agent-api.md` — "forwards exactly the three agent `GET` routes, strips every identity header a client sends on them and sets none"
+- **Asserted in:** `docs/self-hosting.md` — "deletes every identity header a client sends on them and sets none"
+- **Status:** enforced
+- **Enforced by:**
+  `tests/test_proxy_identity.py::is refused by the proxy`
+  `tests/test_proxy_identity.py::agent route: none of those reached the API`
+  `tests/test_proxy_identity.py::a bearer alone is refused by the proxy`
+  `tests/test_proxy_identity.py::a forged identity beside a bearer is refused`
+  `tests/test_proxy_agent_mutations.py`
+
+### C-102 An agent sees what its owner's dashboard shows, and no more
+
+- **Claim:** A token reads the projects the same person's own project list gives,
+  from the same code, with archived projects taken out. It never has emergency
+  access, whoever minted it, and loses a project the moment its owner loses access.
+- **Asserted in:** `docs/agent-api.md` — "The projects the token's owner's own dashboard lists, with archived ones taken out."
+- **Asserted in:** `docs/agent-api.md` — "An agent never has emergency access, whoever minted its token"
+- **Status:** enforced
+- **Enforced by:**
+  `server/tests/test_agent_api.py::test_a_token_sees_exactly_the_projects_its_users_dashboard_lists`
+  `server/tests/test_agent_api.py::test_an_archived_project_is_never_returned_by_any_route`
+  `server/tests/test_agent_api.py::test_an_emergency_user_gets_no_emergency_access_through_a_token`
+  `server/tests/test_agent_api.py::test_losing_access_takes_the_project_from_a_live_token`
+  `server/tests/test_agent_mutations.py::test_each_guard_is_noticed_when_broken`
+
+### C-103 No name, email or free text reaches an agent
+
+- **Claim:** An agent response is built from an allowlist of stored keys, each
+  shape-checked, never copied from the stored record: no name, no email, no note,
+  rationale, evidence title or committee name, and no computed phase, flag, score
+  or verdict. A status or decision that is not a known word is shown as null, and
+  an item or checkpoint id only if it looks like an id.
+- **Asserted in:** `docs/agent-api.md` — "No name and no email appears in any response."
+- **Asserted in:** `docs/agent-api.md` — "Each response is built field by field from an allowlist of stored keys."
+- **Status:** enforced
+- **Enforced by:**
+  `server/tests/test_agent_api.py::test_nothing_hostile_planted_anywhere_reaches_an_agent`
+  `server/tests/test_agent_api.py::test_the_response_models_are_closed_allowlists`
+  `server/tests/test_agent_api.py::test_the_vocabulary_covers_every_framework_definition`
+  `server/tests/test_agent_api.py::test_a_deployments_own_values_pass_and_nothing_else_does`
+  `server/tests/test_agent_docs.py::test_the_documented_response_fields_are_the_models_exactly`
+  `server/tests/test_agent_mutations.py::test_each_guard_is_noticed_when_broken`
+
+### C-104 People are opaque ids
+
+- **Claim:** A person is shown to an agent only as a keyed pseudonym
+  (HMAC-SHA256 under `AGENT_ID_SECRET`): the same person is the same id in every
+  call of a deployment, another deployment's key gives other ids, and the id is
+  not the identity or a bare hash of it.
+- **Asserted in:** `docs/agent-api.md` — "People as **opaque ids** (`u_` and 32 hex characters)."
+- **Status:** enforced
+- **Enforced by:**
+  `server/tests/test_agent_api.py::test_opaque_ids_are_stable_keyed_and_not_the_identity_or_its_hash`
+  `server/tests/test_agent_api.py::test_the_same_person_is_the_same_id_across_calls_and_projects`
+  `server/tests/test_agent_api.py::test_a_different_deployments_secret_gives_different_ids`
+  `server/tests/test_agent_api.py::test_a_short_secret_stops_the_server_starting`
+
+### C-105 A token lasts exactly 8 hours and is stored only as a hash
+
+- **Claim:** A token is valid for exactly 8 hours from minting, and the database
+  refuses any other lifetime. It is shown once, in the mint response; the server
+  keeps a SHA-256 hash of it, and its identity and expiry cannot be rewritten.
+- **Asserted in:** `docs/agent-api.md` — "Exactly 8 hours from the moment it is minted, and the database refuses any other lifetime."
+- **Asserted in:** `docs/agent-api.md` — "only a SHA-256 hash of the whole token is stored"
+- **Status:** enforced
+- **Enforced by:**
+  `server/tests/test_agent_api.py::test_a_minted_token_has_the_shape_and_the_fixed_lifetime`
+  `server/tests/test_agent_api.py::test_the_database_refuses_any_other_lifetime`
+  `server/tests/test_agent_api.py::test_the_secret_is_shown_once_and_stored_only_as_a_hash`
+  `server/tests/test_agent_api.py::test_a_token_works_until_the_eighth_hour_and_not_after`
+  `server/tests/test_agent_api.py::test_a_tokens_identity_and_expiry_cannot_be_rewritten`
+  `server/tests/test_agent_api.py::test_tokens_are_compared_in_constant_time_and_only_there`
+  `server/tests/test_agent_mutations.py::test_each_guard_is_noticed_when_broken`
+
+### C-106 A person holds at most five live tokens
+
+- **Claim:** A sixth live token is refused with a 409, also when two mints arrive
+  at once. Expired and revoked tokens do not count.
+- **Asserted in:** `docs/agent-api.md` — "A sixth is refused with `409` until one expires or is revoked."
+- **Status:** enforced
+- **Enforced by:**
+  `server/tests/test_agent_api.py::test_a_person_holds_at_most_five_live_tokens`
+  `server/tests/test_agent_api.py::test_two_mints_at_once_cannot_both_pass_the_count`
+  `server/tests/test_agent_api.py::test_the_limit_is_a_setting`
+
+### C-107 A token dies with its owner's principal
+
+- **Claim:** Erasing a person's principal, which `make dispose` does when nothing
+  retained names them, deletes their tokens with it, and a deleted token stops
+  working. Removal from the identity provider is not seen by the app, so the
+  8 hours is the bound there (the page says so).
+- **Asserted in:** `docs/agent-api.md` — "Their tokens are deleted with it."
+- **Asserted in:** `docs/privacy.md` — "A token is deleted with the person's `principals` row"
+- **Status:** enforced
+- **Enforced by:**
+  `server/tests/test_agent_api.py::test_a_token_is_deleted_with_its_principal_and_stops_working`
+  `server/tests/test_agent_api.py::test_disposing_of_a_principal_takes_their_tokens_with_it`
+  `tests/test_dispose.py::a disposed person's agent tokens go with them`
+  `server/tests/test_agent_mutations.py::test_each_guard_is_noticed_when_broken`
+
+### C-108 A revoked token stops working on its next call
+
+- **Claim:** The owner's revocation through the API, and the operator's through
+  `make agent-tokens`, end a token on its next call; a person can revoke only their
+  own, and the operator's script ends exactly what it is told to and only live
+  tokens.
+- **Asserted in:** `docs/agent-api.md` — "A revoked token stops working on its next call."
+- **Status:** enforced
+- **Enforced by:**
+  `server/tests/test_agent_api.py::test_you_can_list_and_revoke_only_your_own`
+  `tests/test_agent_tokens.py::revoke --token ends that token`
+  `tests/test_agent_tokens.py::revoke --user ends a person's live tokens`
+  `tests/test_agent_tokens.py::revoke --everyone ends every live token`
+  `tests/test_stack.py::the owner can revoke it, and it stops working`
+  `server/tests/test_agent_mutations.py::test_each_guard_is_noticed_when_broken`
+
+### C-109 Every agent call is in the read trail, marked as agent access
+
+- **Claim:** An answered call writes a row to `access_event`, in the same
+  transaction as the answer, marked `via = 'agent'` with the token's public id and
+  never its secret, and a refused call writes one with the reason. The same fact
+  goes to the security log without the secret.
+- **Asserted in:** `docs/agent-api.md` — "Every call, answered or refused, writes one row to the read trail (`access_event`)"
+- **Status:** enforced
+- **Enforced by:**
+  `server/tests/test_agent_api.py::test_every_agent_call_is_in_the_read_trail_marked_as_agent_access`
+  `server/tests/test_agent_api.py::test_the_portfolio_entry_lists_the_ids_that_were_returned`
+  `server/tests/test_agent_api.py::test_refused_calls_are_recorded_and_say_why_to_the_operator_only`
+  `server/tests/test_agent_api.py::test_agent_calls_also_reach_the_security_log_without_the_secret`
+  `server/tests/test_access_audit.py::test_the_check_constraint_and_the_enum_agree`
+  `tests/test_stack.py::each call is in the real read trail, marked as agent access`
+  `server/tests/test_agent_mutations.py::test_each_guard_is_noticed_when_broken`
+
+### C-110 An agent token has its own, lower rate limit
+
+- **Claim:** Each token is limited separately and lower than a session is, a flood
+  of unreadable tokens is limited by source and never by a header a client can
+  rotate, and one agent cannot spend another's allowance.
+- **Asserted in:** `docs/agent-api.md` — "Each token may make 60 calls per 60 seconds (`AGENT_RATE_LIMIT_MAX_REQUESTS`), lower than the limit a person at the dashboard has (240)."
+- **Status:** enforced
+- **Enforced by:**
+  `server/tests/test_agent_api.py::test_an_agent_token_has_its_own_lower_limit`
+  `server/tests/test_agent_api.py::test_a_flood_of_bad_tokens_is_limited_by_source_and_never_by_the_header`
+  `server/tests/test_agent_api.py::test_the_default_agent_limit_is_lower_than_the_default_session_limit`
+  `server/tests/test_agent_mutations.py::test_each_guard_is_noticed_when_broken`
+
+### C-111 The agent API has no write route
+
+- **Claim:** The agent API is three GET routes. A write verb is a 405 from the API
+  and a 404 from the proxy, and no route under the prefix changes a record.
+- **Asserted in:** `docs/agent-api.md` — "Read-only. Three `GET` routes under `/api/agent/`, and nothing that writes."
+- **Status:** enforced
+- **Enforced by:**
+  `server/tests/test_agent_api.py::test_the_agent_routes_are_read_only`
+  `tests/test_proxy_identity.py::is refused by the proxy`
+  `tests/test_stack.py::a write verb on the agent route is refused by the proxy`
+  `server/tests/test_agent_mutations.py::test_each_guard_is_noticed_when_broken`

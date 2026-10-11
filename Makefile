@@ -26,7 +26,7 @@ POSTGRES_DB   ?= chai
 HTTP_PORT     ?= 8080
 
 .DEFAULT_GOAL := help
-.PHONY: help env preflight doctor up dev down logs ps config build-app shell psql backup backup-plaintext restore reapply-purges dispose verify-backup subject-access phi-scan prune check-isolation lock
+.PHONY: help env preflight doctor up dev down logs ps config build-app shell psql backup backup-plaintext restore reapply-purges dispose agent-tokens verify-backup subject-access phi-scan prune check-isolation lock
 
 help:  ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -176,6 +176,11 @@ reapply-purges:  ## Re-apply purges after a restore: make reapply-purges LEDGER=
 # disposes of them (a tombstone stays) and records who ran it. Held projects are kept.
 dispose:  ## Report records past their retention period: make dispose [APPLY=1 BY=<name>]
 	@python3 scripts/dispose.py --psql "$(PSQL_OWNER)" $(if $(APPLY),--apply --by "$(BY)",)
+
+# Agent tokens (#164): list them, or end them as the operator. The app has no
+# administrator role, so this is an operator action, like dispose.
+agent-tokens:  ## List agent tokens, or revoke: make agent-tokens [REVOKE=1 (TOKEN=<id> | WHO=<user> | ALL=1)]
+	@python3 scripts/agent_tokens.py --psql "$(PSQL_OWNER)" $(if $(REVOKE),revoke $(if $(TOKEN),--token "$(TOKEN)",$(if $(WHO),--user "$(WHO)",$(if $(ALL),--everyone,))),list $(if $(WHO),--user "$(WHO)",))
 
 # Where one person's identifier is stored, for a subject access request (#57).
 subject-access:  ## Find where one person's identifier is stored: make subject-access WHO=a@b.org

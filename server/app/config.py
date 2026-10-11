@@ -164,6 +164,40 @@ def _idle_lock_minutes() -> int:
     return int(raw)
 
 
+# The secret that makes the agent API's person ids opaque (#164). It is a key, not a
+# password a person types, so a short one is refused rather than accepted.
+AGENT_ID_SECRET_MIN_LENGTH = 32
+
+# A status or decision value a deployment adds for a build of its own framework
+# (AGENT_EXTRA_VALUES). It is shown to an agent as the stored value, so it must look
+# like a vocabulary word and not like a name or an address.
+AGENT_VALUE_SHAPE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ,&/+._-]{0,63}$")
+
+
+def _agent_id_secret() -> str:
+    value = os.environ.get("AGENT_ID_SECRET", "").strip()
+    if value and len(value) < AGENT_ID_SECRET_MIN_LENGTH:
+        raise RuntimeError(
+            f"AGENT_ID_SECRET is set but shorter than {AGENT_ID_SECRET_MIN_LENGTH} "
+            "characters. It keys the pseudonym of every person the agent API names, "
+            "so it must be long and random: openssl rand -base64 48. Unset it to "
+            "leave the agent API off."
+        )
+    return value
+
+
+def _agent_extra_values() -> frozenset[str]:
+    values = _csv("AGENT_EXTRA_VALUES")
+    for value in values:
+        if not AGENT_VALUE_SHAPE.fullmatch(value):
+            raise RuntimeError(
+                f"AGENT_EXTRA_VALUES holds {value!r}, which is not a status or "
+                "decision value: letters, digits, spaces and , & / + . _ - only, "
+                "up to 64 characters, starting with a letter or digit."
+            )
+    return frozenset(values)
+
+
 def _csv(name: str) -> list[str]:
     return [part.strip() for part in _str(name).split(",") if part.strip()]
 
@@ -358,9 +392,28 @@ class Settings:
     # is validated (see SIGN_OUT_RULES): https, or a path on this origin.
     sign_out_url: str = ""
 
+    # --- agent API (#164, D-89) -------------------------------------------
+    # The key that turns an identity id into the opaque id an agent is shown. Empty
+    # leaves the agent API off: no token can be minted and every /api/agent/ route
+    # answers 404. It is never logged and never returned.
+    agent_id_secret: str = ""
+    # Requests per token per rate-limit window. Lower than rate_limit_max_requests,
+    # which a person at a dashboard needs and an agent loop does not.
+    agent_rate_limit_max_requests: int = 60
+    # Tokens a person may hold at once (not revoked, not expired).
+    agent_max_active_tokens: int = 5
+    # Status and decision values beyond the published and example frameworks', for a
+    # build of another framework (D-79). Anything else is shown to an agent as null.
+    agent_extra_values: frozenset[str] = frozenset()
+
     # --- misc -------------------------------------------------------------
     version: str = "0.1.0"
     log_page_size: int = 60
+
+    @property
+    def agent_api_enabled(self) -> bool:
+        """The agent API is on only when it has a secret to make ids opaque with."""
+        return bool(self.agent_id_secret)
 
     @property
     def serving_database_url(self) -> str:
@@ -554,6 +607,10 @@ class Settings:
             sse_max_lifetime_seconds=float(_int("SSE_MAX_LIFETIME_SECONDS", 900)),
             idle_lock_minutes=_idle_lock_minutes(),
             sign_out_url=_sign_out_url(),
+            agent_id_secret=_agent_id_secret(),
+            agent_rate_limit_max_requests=_int("AGENT_RATE_LIMIT_MAX_REQUESTS", 60),
+            agent_max_active_tokens=_int("AGENT_MAX_ACTIVE_TOKENS", 5),
+            agent_extra_values=_agent_extra_values(),
             version=_str("APP_VERSION", "0.1.0"),
             log_page_size=_int("LOG_PAGE_SIZE", 60),
         )

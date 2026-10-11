@@ -178,9 +178,10 @@ services:
       RUN_MIGRATIONS: "false"
       API_PORT: "8000"
 
-      # Which headers carry identity. The API reads these and NOTHING else --
-      # no cookie, no bearer token, no query parameter. Keep them in sync with
-      # proxy/Caddyfile.
+      # Which headers carry identity. On every route but /api/agent/, the API reads
+      # these and NOTHING else: no cookie, no bearer token, no query parameter. (The
+      # agent routes answer to a bearer token and ignore these headers: #164.) Keep
+      # them in sync with proxy/Caddyfile.
       AUTH_HEADER_ID: ${AUTH_HEADER_ID:-X-Auth-Request-User}
       AUTH_HEADER_NAME: ${AUTH_HEADER_NAME:-X-Auth-Request-Name}
       AUTH_HEADER_EMAIL: ${AUTH_HEADER_EMAIL:-X-Auth-Request-Email}
@@ -209,6 +210,15 @@ services:
       # Reject a request that arrives with no identity rather than inventing an
       # anonymous user. Leave this on everywhere except a throwaway demo.
       REQUIRE_IDENTITY: ${REQUIRE_IDENTITY:-true}
+
+      # The read-only agent API (#164, docs/agent-api.md). OFF while AGENT_ID_SECRET is
+      # empty: no token can be minted and /api/agent/ answers 404. Set it to a long
+      # random value (openssl rand -base64 48) to turn the API on; it keys the opaque
+      # ids the API shows in place of people, so keep it like a password.
+      AGENT_ID_SECRET: ${AGENT_ID_SECRET:-}
+      AGENT_RATE_LIMIT_MAX_REQUESTS: ${AGENT_RATE_LIMIT_MAX_REQUESTS:-60}
+      AGENT_MAX_ACTIVE_TOKENS: ${AGENT_MAX_ACTIVE_TOKENS:-5}
+      AGENT_EXTRA_VALUES: ${AGENT_EXTRA_VALUES:-}
 
       LOG_LEVEL: ${LOG_LEVEL:-info}
       # One JSON object per line, security events named and tagged (#38). `text` is

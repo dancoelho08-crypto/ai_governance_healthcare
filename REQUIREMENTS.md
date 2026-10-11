@@ -82,7 +82,9 @@ honest answer and is a gap worth closing; see R-19.
 
 ### R-06 Identity comes from the proxy and nowhere else
 
-- Status: Active
+- Status: Active, narrowed by R-71 and D-89 (owner's decision, 2026-10-10): the
+  read-only routes under `/api/agent/` answer to a per-user bearer token and
+  ignore the identity header; everything below holds for every other route
 - The API reads exactly the identity headers the proxy sets. Never from a body,
   a query parameter, a cookie or a token. The API has no user table, no password
   hash, no login form and no token endpoint.
@@ -1340,3 +1342,47 @@ honest answer and is a gap worth closing; see R-19.
   skip list is "defined three times ... with no test pinning them equal"); D-82.
 - Enforced by: `tests/test_export_schema.py`, `tests/test_fingerprint_skip.py`,
   `server/tests/test_fingerprint.py`.
+
+### R-71 Agents read through per-user, short-lived tokens
+
+- Status: Active
+- A program acting for a person (an assistant that answers questions about the
+  portfolio) reads what the governance records state through a bearer token that
+  person minted in the app, and through nothing else:
+    - **Per user, any role.** A token is minted by a signed-in person for
+      themselves. It reads exactly what that person's own dashboard shows: the
+      same list from the same code, nothing archived, and never emergency access,
+      whoever minted it.
+    - **Short-lived and revocable.** Exactly 8 hours, fixed, and the database
+      refuses any other lifetime. Shown once, stored only as a hash, revocable
+      by its owner through the API and by an operator, and deleted with its
+      owner's principal. Removal from the identity provider is not visible to
+      the app, and the 8 hours is the bound there.
+    - **Read-only, on one route family.** Three GET routes under `/api/agent/`.
+      A token is accepted nowhere else and can never mint, list or revoke
+      tokens; the identity header is ignored on those routes, and the proxy
+      strips it and sets none.
+    - **Stored values only.** Statuses, decisions, dates and one comparison of a
+      due date with today; no computed phase, flag, color or verdict; no free
+      text (no note, rationale or evidence title); people as opaque ids, never
+      names or emails. A response is built from an allowlist of fields, never by
+      filtering the stored document.
+    - **Recorded and limited.** Every call, answered or refused, is in the read
+      trail marked as agent access with the token's public id (never the
+      secret), and has a rate limit lower than a session's. Every bad token gets
+      the same 401.
+- This narrows R-06 ("never ... a token", "no token endpoint") for the agent
+  routes only, by the owner's decision on #164 (2026-10-10, decisions 1 to 5).
+  Where an answer goes after it leaves the server (to a model, for one) is the
+  operator's decision, and the docs say so ([privacy](docs/privacy.md)).
+- Source: #164, the owner's decisions of 2026-10-10; DECISIONS D-89.
+- Enforced by: `server/tests/test_agent_api.py` (visibility equal to the
+  session's list, never archived, never emergency; bearer refused on every
+  other route; no mint, list or revoke by a token; the uniform 401; hostile data
+  planted everywhere never reaching a response; opaque ids; the read trail; the
+  rate limit; the 8 hours and the cascade), `server/tests/test_agent_mutations.py`
+  (each guard broken in a copy and noticed), `server/tests/test_agent_docs.py`
+  (the page is the app's contract and its examples run), `tests/test_proxy_identity.py`
+  and `tests/test_proxy_agent_mutations.py` (the proxy route, with a real Caddy),
+  `tests/test_agent_tokens.py` (the operator's revoke), and
+  `tests/test_stack.py` (the whole stack); claims C-97 to C-111.

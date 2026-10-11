@@ -30,6 +30,7 @@ import time
 from collections import defaultdict, deque
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import Any
 
 import asyncpg
@@ -40,6 +41,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.requests import ClientDisconnect
 
+from .accessaudit import source_of
+from .agent import agent_router, is_agent_path, token_router
+from .agent_tokens import parse_bearer
 from .auth import log_auth_posture
 from .config import Settings
 from .db import Database
@@ -403,6 +407,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings.rate_limit_window_seconds,
         settings.rate_limit_max_requests,
     )
+    # Agent tokens get their own, lower limit (#164). It is keyed on the token's public
+    # id, so one agent cannot spend another's allowance, and a bad token on the
+    # source address, so guessing is not free.
+    agent_limiter = SlidingWindowRateLimiter(
+        settings.rate_limit_window_seconds,
+        settings.agent_rate_limit_max_requests,
+    )
+    app.state.clock = lambda: datetime.now(UTC)
     announced: dict[str, float] = {}  # when each client's trip was last reported
 
     if settings.cors_origins:
@@ -426,8 +438,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # from inside the load balancer. That exemption is why the database
         # check behind it is cached -- see Database.ping_cached.
         if _is_api_path(path) and request.method != "OPTIONS" and path != "/api/health":
-            key = _rate_limit_key(request, settings)
-            if not await rate_limiter.allow(key):
+            if is_agent_path(path):
+                # The identity header is not read here: on this route it means
+                # nothing, so it cannot be the key either (a client would rotate it).
+                presented = parse_bearer(request.headers.get("authorization"))
+                source = source_of(request)
+                tripped = None
+                if not await rate_limiter.allow(f"agent-src:{source}"):
+                    tripped = (f"agent-src:{source}", settings.rate_limit_max_requests)
+                else:
+                    key = (
+                        f"agent:{presented.token_id}"
+                        if presented.token_id
+                        else f"agent-bad:{source}"
+                    )
+                    if not await agent_limiter.allow(key):
+                        tripped = (key, settings.agent_rate_limit_max_requests)
+            else:
+                key = _rate_limit_key(request, settings)
+                tripped = (
+                    None
+                    if await rate_limiter.allow(key)
+                    else (key, settings.rate_limit_max_requests)
+                )
+            if tripped is not None:
+                key, ceiling = tripped
                 # Once per client per window: a flood of refused requests must not
                 # become a flood of log lines, which is the denial of service again.
                 now = time.monotonic()
@@ -439,7 +474,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         SecurityEvent.RATELIMIT_TRIPPED,
                         f"rate limit tripped for {key}",
                         key=key,
-                        limit=settings.rate_limit_max_requests,
+                        limit=ceiling,
                         window_seconds=settings.rate_limit_window_seconds,
                     )
                 return JSONResponse(
@@ -455,6 +490,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             response.headers.setdefault("X-Content-Type-Options", "nosniff")
             response.headers.setdefault("X-Frame-Options", "DENY")
             response.headers.setdefault("Referrer-Policy", "no-referrer")
+            if is_agent_path(path):
+                # An answer to a bearer token, or the refusal of one: never stored.
+                response.headers["Cache-Control"] = "no-store"
             if _is_tls(request):
                 response.headers.setdefault("Strict-Transport-Security", HSTS_VALUE)
         return response
@@ -574,6 +612,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(BodySizeLimitMiddleware, limit=settings.request_body_limit_bytes)
 
     app.include_router(router)
+    app.include_router(agent_router)
+    app.include_router(token_router)
     return app
 
 

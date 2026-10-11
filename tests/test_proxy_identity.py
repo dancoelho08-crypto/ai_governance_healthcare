@@ -25,8 +25,10 @@ apart is to ask the upstream whether it ever saw the request.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import posixpath
 import re
 import shutil
 import subprocess
@@ -34,6 +36,7 @@ import sys
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -69,8 +72,12 @@ EDGE_BODY_CAP = 2_000_000
 
 ROOT = Path(__file__).resolve().parent.parent
 CADDYFILE = ROOT / "proxy" / "Caddyfile"
-PORT = 18099
-NET = "chai-proxy-test"
+# Overridable so two runs on one machine (two worktrees, a developer and CI's
+# neighbor) do not collide on the port, the network or the container names.
+PORT = int(os.environ.get("PROXY_TEST_PORT", "18099"))
+NET = os.environ.get("PROXY_TEST_NET", "chai-proxy-test")
+CADDY = os.environ.get("PROXY_TEST_CADDY", "chai-test-caddy")
+ECHO_NAME = os.environ.get("PROXY_TEST_ECHO", "chai-test-echo")
 
 # CI sets REQUIRE_TESTS=1. A suite that cannot run then FAILS instead of
 # skipping, because a skip exits 0 and reads as a pass: that is how CI once
@@ -233,12 +240,12 @@ def get(path: str, headers: dict[str, str]) -> tuple[int, str]:
 
 
 def start_caddy(workdir: Path, env: dict[str, str]) -> None:
-    docker("rm", "-f", "chai-test-caddy")
+    docker("rm", "-f", CADDY)
     args = [
         "run",
         "-d",
         "--name",
-        "chai-test-caddy",
+        CADDY,
         "--network",
         NET,
         "-p",
@@ -391,23 +398,212 @@ def check_proxy_shared_secret(workdir: Path) -> None:
     )
 
 
-def main() -> int:
-    if not shutil.which("docker") or docker("info").returncode != 0:
-        print("docker unavailable; skipping proxy identity checks")
-        return 1 if REQUIRE_TESTS else 0
+# Every header a front door, or a client pretending to be one, could use to say who
+# a request is from. None may reach the API on the agent route.
+IDENTITY_HEADERS = [
+    "X-Auth-Request-User", "X-Auth-Request-Name", "X-Auth-Request-Email",
+    "X-Goog-Authenticated-User-Email", "X-Goog-Authenticated-User-Id",
+    "X-Goog-Iap-Jwt-Assertion", "X-Amzn-Oidc-Identity", "X-Amzn-Oidc-Data",
+    "X-Amzn-Oidc-Accesstoken", "X-Ms-Client-Principal", "X-Ms-Client-Principal-Id",
+    "X-Ms-Client-Principal-Name", "X-Ms-Client-Principal-Idp", "X-Forwarded-Email",
+    "X-Forwarded-User", "X-Forwarded-Preferred-Username",
+]  # fmt: skip
 
+BEARER = {"Authorization": "Bearer agt_0123456789abcdef." + "A" * 43}
+
+
+def check_agent_route(workdir: Path) -> None:
+    """The agent API's route (#164): reachable with no single sign-on, read-only,
+    and never an identity.
+
+    Four things, each a way this could quietly become a hole:
+
+    1. only the three agent GET routes are forwarded, and nothing else under
+       /api/agent/ (a write verb, an unknown path) reaches the API at all;
+    2. every identity header a client sends on the route is stripped, whichever
+       front door's name it uses, and the bearer is passed through untouched;
+    3. the proxy never sets an identity on the route, so a request that gets
+       through to a route that needs one gets a 401 from the API;
+    4. every other route behaves as before: an anonymous /api/agent-tokens or
+       /api/projects is still refused by the proxy, whatever it carries.
+    """
+    oauth2 = FRONT_DOORS[3]
+    start_caddy(workdir, oauth2[1])
+    signed_in = oauth2[2]
+
+    def seen() -> list[dict]:
+        return seen_by_upstream(signed_in)
+
+    forged = {name: "evil@x.example" for name in IDENTITY_HEADERS}
+    for path in (
+        "/api/agent/me",
+        "/api/agent/portfolio?status=met&limit=5",
+        "/api/agent/projects/p1",
+    ):
+        status, body, headers = request(path, {**forged, **BEARER})
+        label = path.split("?")[0]
+        check(
+            f"agent route {label}: forwarded with no sign-on",
+            status == 200,
+            f"HTTP {status}",
+        )
+        got = (
+            {k.lower(): v for k, v in json.loads(body).items()} if status == 200 else {}
+        )
+        check(
+            f"agent route {label}: the bearer reaches the API unchanged",
+            got.get("authorization") == BEARER["Authorization"],
+            f"got {got.get('authorization')!r}",
+        )
+        leaked = [h for h in IDENTITY_HEADERS if h.lower() in got]
+        check(
+            f"agent route {label}: no client-supplied identity header reaches the API",
+            not leaked,
+            ", ".join(leaked),
+        )
+        check(
+            f"agent route {label}: the answer is not cacheable",
+            headers.get("cache-control") == "no-store",
+            f"got {headers.get('cache-control')!r}",
+        )
+        for name, want in EXPECTED_HEADERS.items():
+            check(f"agent route {label}: {name}", headers.get(name) == want)
+
+    # Nothing is set either: with no identity of its own, the proxy forwards none.
+    status, body, _ = request("/api/agent/me", BEARER)
+    got = {k.lower() for k in json.loads(body)} if status == 200 else set()
+    check(
+        "the proxy sets no identity on the agent route",
+        status == 200 and not [h for h in IDENTITY_HEADERS if h.lower() in got],
+        f"HTTP {status}",
+    )
+
+    # 1. Only the three GET routes. A write verb, an unknown path and a path that
+    #    only looks like one are answered by the proxy and go no further.
+    before = len(seen())
+    for method in ("POST", "PUT", "PATCH", "DELETE"):
+        status, _, _ = request(
+            "/api/agent/me",
+            BEARER,
+            method=method,
+            body=b"{}" if method != "DELETE" else None,
+        )
+        check(
+            f"agent route: {method} is refused by the proxy",
+            status == 404,
+            f"HTTP {status}",
+        )
+    for path in (
+        "/api/agent/",
+        "/api/agent/projects",
+        "/api/agent/anything",
+        "/api/agent/mine",
+        "/api/agent/portfolio/x",
+    ):
+        status, _, _ = request(path, {**forged, **BEARER})
+        check(f"agent route: {path} is not forwarded", status == 404, f"HTTP {status}")
+    check(
+        "agent route: none of those reached the API",
+        seen()[before:] == [],
+        f"upstream saw {seen()[before:]}",
+    )
+
+    # A path that tries to leave the prefix, in the spellings a client can send. The
+    # proxy may refuse it, or route it by the path it makes of it (as the single
+    # sign-on route, which is then a session like any other). What must hold is that
+    # a request the API would read as an agent route arrives with no identity.
+    for path in (
+        "/api/agent/me/../../projects",
+        "/api/agent/%2e%2e/projects",
+        "/api/agent/projects/..%2f..%2fme",
+        "/API/AGENT/ME",
+        "/api/Agent/me",
+        "//api/agent/me",
+        "/api/agent/me/",
+    ):
+        before = len(seen())
+        status, body, _ = request(path, {**forged, **BEARER})
+        reached = seen()[before:]
+        got = {k.lower() for k in json.loads(body)} if status == 200 else set()
+        for hit in reached:
+            api_path = posixpath.normpath(urllib.parse.unquote(hit["path"])).lower()
+            if api_path.startswith("/api/agent/"):
+                check(
+                    f"agent route: {path} reaches the API as an agent path "
+                    "with no identity",
+                    not [h for h in IDENTITY_HEADERS if h.lower() in got],
+                    f"HTTP {status}, upstream path {hit['path']!r}",
+                )
+        check(
+            f"agent route: {path} is refused, or forwarded as a plain session request",
+            status in (200, 401, 404) and (status != 200 or bool(reached)),
+            f"HTTP {status}",
+        )
+
+    # 4. Every other route is as it was: no identity, no entry, whatever else it
+    #    carries. (The oauth2-proxy rig reads X-Forwarded-Email as the front door's
+    #    own header, so the forgery here is the canonical set, which the proxy
+    #    strips.)
+    canonical = {
+        h: "evil@x.example"
+        for h in ("X-Auth-Request-User", "X-Auth-Request-Name", "X-Auth-Request-Email")
+    }
+    for path in ("/api/agent-tokens", "/api/projects", "/api/me", "/api/agentx"):
+        status, _, _ = request(path, BEARER)
+        check(
+            f"{path}: a bearer alone is refused by the proxy",
+            status == 401,
+            f"HTTP {status}",
+        )
+        status, _, _ = request(path, {**canonical, **BEARER})
+        check(
+            f"{path}: a forged identity beside a bearer is refused",
+            status == 401,
+            f"HTTP {status}",
+        )
+    status, body, _ = request("/api/agent-tokens", {**signed_in, **BEARER})
+    got = {k.lower(): v for k, v in json.loads(body).items()} if status == 200 else {}
+    check(
+        "/api/agent-tokens: a signed-in session still gets its identity set",
+        status == 200 and got.get("x-auth-request-email") == "cmo@hospital.org",
+        f"HTTP {status}",
+    )
+    # And the shared secret is still sent on the agent route, as on every route.
+    start_caddy(workdir, {**oauth2[1], "PROXY_SHARED_SECRET": "agent/route+secret="})
+    status, body, _ = request(
+        "/api/agent/me", {**BEARER, "X-Proxy-Secret": "chosen-by-the-client"}
+    )
+    got = {k.lower(): v for k, v in json.loads(body).items()} if status == 200 else {}
+    check(
+        "agent route: X-Proxy-Secret is the proxy's, not the client's",
+        got.get("x-proxy-secret") == "agent/route+secret=",
+        f"got {got.get('x-proxy-secret')!r}",
+    )
+
+
+def docker_usable() -> bool:
+    return bool(shutil.which("docker")) and docker("info").returncode == 0
+
+
+@contextlib.contextmanager
+def rig():
+    """A scratch directory, a network and an echo upstream named `api`, then gone.
+
+    The mutation test (tests/test_proxy_agent_mutations.py) builds the same rig and
+    points start_caddy at a broken copy of the Caddyfile.
+    """
     workdir = Path(tempfile.mkdtemp(prefix="chai-proxy-test-"))
     (workdir / "srv").mkdir()
     (workdir / "srv" / "index.html").write_text("app")
     (workdir / "echo.py").write_text(ECHO)
 
     docker("network", "create", NET)
-    docker("rm", "-f", "chai-test-echo")
+    docker("rm", "-f", ECHO_NAME)
     docker(
         "run",
         "-d",
         "--name",
-        "chai-test-echo",
+        ECHO_NAME,
         "--network",
         NET,
         "--network-alias",
@@ -418,93 +614,22 @@ def main() -> int:
         "python",
         "/echo.py",
     )
-
     try:
-        for name, env, sent, expected in FRONT_DOORS:
-            start_caddy(workdir, env)
-            status, body = get("/api/me", sent)
-            if status != 200:
-                check(f"{name}: request is forwarded", False, f"HTTP {status}")
-                continue
-            check(f"{name}: request is forwarded", True)
-            got = {k.lower(): v for k, v in json.loads(body).items()}
-            for header, want in expected.items():
-                check(
-                    f"{name}: {header} = {want!r}",
-                    got.get(header.lower()) == want,
-                    f"got {got.get(header.lower())!r}",
-                )
-            leaked = [
-                k
-                for k in got
-                if k.startswith(("x-goog", "x-amzn", "x-ms-client", "x-forwarded-user"))
-                or k in ("x-forwarded-email", "x-forwarded-preferred-username")
-            ]
-            check(
-                f"{name}: no provider header reaches the API",
-                not leaked,
-                ", ".join(leaked),
-            )
-
-        # The canonical headers must never be accepted from the client.
-        start_caddy(workdir, FRONT_DOORS[0][1])
-        status, _ = get(
-            "/api/me",
-            {"X-Auth-Request-User": "evil@x", "X-Auth-Request-Email": "evil@x"},
-        )
-        check("a forged X-Auth-Request-* is refused", status == 401, f"HTTP {status}")
-
-        status, _ = get("/api/me", {})
-        check("a request with no identity is refused", status == 401, f"HTTP {status}")
-
-        # An unset source must fail closed, not fall back to something usable.
-        start_caddy(
-            workdir,
-            {
-                "IDENTITY_ID_SOURCE": "",
-                "IDENTITY_NAME_SOURCE": "",
-                "IDENTITY_EMAIL_SOURCE": "",
-            },
-        )
-        status, _ = get("/api/me", {"X-Forwarded-Email": "cmo@hospital.org"})
-        check("an unset identity source fails closed", status == 401, f"HTTP {status}")
-
-        # ---------------------------------------------------------------
-        # PROXY_SHARED_SECRET (#61). The API rejects a request that lacks the
-        # secret, so the control only works if the proxy sends it. It was
-        # documented for months while nothing did: switching it on made every
-        # request answer 403.
-        # ---------------------------------------------------------------
-        check_proxy_shared_secret(workdir)
-
-        # ---------------------------------------------------------------
-        # The response headers and the edge body cap. #20 added both and
-        # nothing asserted either; see the module docstring for why a Python
-        # test of the API cannot stand in for this.
-        # ---------------------------------------------------------------
-        oauth2 = FRONT_DOORS[3]
-        start_caddy(workdir, oauth2[1])
-        signed_in = oauth2[2]
-
-        check_security_headers("an authenticated /api response", "/api/me", signed_in)
-        check_security_headers("an anonymous /api 401", "/api/me", {})
-        check_security_headers("the dashboard", "/", {})
-
-        # Cache-Control belongs to the static handler alone: the dashboard is
-        # rebuilt at a URL that never changes, so a cached copy is a stale app.
-        _, _, dash = request("/", {})
-        check(
-            "the dashboard is served no-cache",
-            dash.get("cache-control") == "no-cache",
-            f"got {dash.get('cache-control')!r}",
-        )
-
-        check_edge_body_cap(signed_in)
+        yield workdir
     finally:
-        docker("rm", "-f", "chai-test-caddy")
-        docker("rm", "-f", "chai-test-echo")
+        docker("rm", "-f", CADDY)
+        docker("rm", "-f", ECHO_NAME)
         docker("network", "rm", NET)
         shutil.rmtree(workdir, ignore_errors=True)
+
+
+def main() -> int:
+    if not docker_usable():
+        print("docker unavailable; skipping proxy identity checks")
+        return 1 if REQUIRE_TESTS else 0
+
+    with rig() as workdir:
+        run_checks(workdir)
 
     print()
     if failures:
@@ -512,6 +637,92 @@ def main() -> int:
         return 1
     print("proxy identity checks passed")
     return 0
+
+
+def run_checks(workdir: Path) -> None:
+    for name, env, sent, expected in FRONT_DOORS:
+        start_caddy(workdir, env)
+        status, body = get("/api/me", sent)
+        if status != 200:
+            check(f"{name}: request is forwarded", False, f"HTTP {status}")
+            continue
+        check(f"{name}: request is forwarded", True)
+        got = {k.lower(): v for k, v in json.loads(body).items()}
+        for header, want in expected.items():
+            check(
+                f"{name}: {header} = {want!r}",
+                got.get(header.lower()) == want,
+                f"got {got.get(header.lower())!r}",
+            )
+        leaked = [
+            k
+            for k in got
+            if k.startswith(("x-goog", "x-amzn", "x-ms-client", "x-forwarded-user"))
+            or k in ("x-forwarded-email", "x-forwarded-preferred-username")
+        ]
+        check(
+            f"{name}: no provider header reaches the API",
+            not leaked,
+            ", ".join(leaked),
+        )
+
+    # The canonical headers must never be accepted from the client.
+    start_caddy(workdir, FRONT_DOORS[0][1])
+    status, _ = get(
+        "/api/me",
+        {"X-Auth-Request-User": "evil@x", "X-Auth-Request-Email": "evil@x"},
+    )
+    check("a forged X-Auth-Request-* is refused", status == 401, f"HTTP {status}")
+
+    status, _ = get("/api/me", {})
+    check("a request with no identity is refused", status == 401, f"HTTP {status}")
+
+    # An unset source must fail closed, not fall back to something usable.
+    start_caddy(
+        workdir,
+        {
+            "IDENTITY_ID_SOURCE": "",
+            "IDENTITY_NAME_SOURCE": "",
+            "IDENTITY_EMAIL_SOURCE": "",
+        },
+    )
+    status, _ = get("/api/me", {"X-Forwarded-Email": "cmo@hospital.org"})
+    check("an unset identity source fails closed", status == 401, f"HTTP {status}")
+
+    # ---------------------------------------------------------------
+    # PROXY_SHARED_SECRET (#61). The API rejects a request that lacks the
+    # secret, so the control only works if the proxy sends it. It was
+    # documented for months while nothing did: switching it on made every
+    # request answer 403.
+    # ---------------------------------------------------------------
+    check_proxy_shared_secret(workdir)
+
+    # ---------------------------------------------------------------
+    # The response headers and the edge body cap. #20 added both and
+    # nothing asserted either; see the module docstring for why a Python
+    # test of the API cannot stand in for this.
+    # ---------------------------------------------------------------
+    oauth2 = FRONT_DOORS[3]
+    start_caddy(workdir, oauth2[1])
+    signed_in = oauth2[2]
+
+    check_security_headers("an authenticated /api response", "/api/me", signed_in)
+    check_security_headers("an anonymous /api 401", "/api/me", {})
+    check_security_headers("the dashboard", "/", {})
+
+    # Cache-Control belongs to the static handler alone: the dashboard is
+    # rebuilt at a URL that never changes, so a cached copy is a stale app.
+    _, _, dash = request("/", {})
+    check(
+        "the dashboard is served no-cache",
+        dash.get("cache-control") == "no-cache",
+        f"got {dash.get('cache-control')!r}",
+    )
+
+    check_edge_body_cap(signed_in)
+
+    # The agent API's route: no single sign-on, read-only, never an identity (#164).
+    check_agent_route(workdir)
 
 
 if __name__ == "__main__":

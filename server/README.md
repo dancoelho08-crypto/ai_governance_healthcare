@@ -37,6 +37,8 @@ The rest of the API:
 | `GET /api/principals?ids=a,b,c` | Names and emails for identity ids, for people the caller can already see (below) |
 | `GET /api/projects/{id}/versions`, `.../versions/{rev}` | The revision list, and one revision, for anyone who can read the project. A purged revision answers empty with `purged: true` |
 | `GET /api/events` | One event per change, for as long as the stream is held |
+| `GET /api/agent/me`, `/api/agent/portfolio`, `/api/agent/projects/{id}` | The read-only agent API: stored statuses, decisions and dates, people as opaque ids, answered to a per-user bearer token and no other credential. Off until `AGENT_ID_SECRET` is set ([The agent API](../docs/agent-api.md)) |
+| `POST`, `GET /api/agent-tokens`, `DELETE /api/agent-tokens/{id}` | Mint, list and revoke your own agent tokens, with the session, never with a token |
 
 Every read of a record is also written to `access_event`, in the transaction of
 the read. See [the read trail](../docs/deploy.md#the-read-trail).
@@ -70,9 +72,11 @@ Deleting a project removes its live log by cascade. `at` and
 even though the browser sends both — a log whose author is a field the client
 sets is not a log.
 
-**Identity comes from a proxy header and nothing else.** No cookie, no bearer
-token, no query parameter. Which header is configurable, because each cloud
-sends a different one.
+**Identity comes from a proxy header and nothing else, on every route but the
+agent API's.** No cookie, no bearer token, no query parameter. Which header is
+configurable, because each cloud sends a different one. The three read-only
+routes under `/api/agent/` are the one exception: they answer to a per-user
+bearer token and ignore the identity header ([the agent API](../docs/agent-api.md)).
 
 ## The one hard requirement
 
@@ -119,6 +123,10 @@ controls, and the CIDR check would be checking the attacker's own claim.
 | `SSE_MAX_LIFETIME_SECONDS` | `900` | Longest an event stream stays open before the server ends it and the browser reconnects through the front door. `0` is no limit. |
 | `IDLE_LOCK_MINUTES` | `0` | Minutes of inactivity before the dashboard locks. `0` is off. Sent to the browser in `/api/health`. |
 | `SIGN_OUT_URL` | — | Where the front door ends a session; an `https` URL or a path on this origin. Shown as a "Sign out" link. |
+| `AGENT_ID_SECRET` | — | Turns the agent API on: at least 32 random characters, keying the opaque ids it shows for people. Empty, no token can be minted and `/api/agent/` answers 404. See [the agent API](../docs/agent-api.md). |
+| `AGENT_RATE_LIMIT_MAX_REQUESTS` | `60` | Calls per agent token per rate-limit window, lower than `RATE_LIMIT_MAX_REQUESTS`. |
+| `AGENT_MAX_ACTIVE_TOKENS` | `5` | Live agent tokens one person may hold. |
+| `AGENT_EXTRA_VALUES` | — | Status and decision words of a build of your own framework, beyond the published and example ones; any other stored value reaches an agent as null. |
 | `RUN_MIGRATIONS` | `true` | Apply `migrations/*.sql` at boot, under an advisory lock. **Must be `false`** when the API serves as the restricted role (it cannot create tables); `python -m app.migrate` migrates instead. |
 | `APP_DATABASE_URL` | — | The restricted role's connection string. Wins over the pieces below. |
 | `APP_POSTGRES_USER` | `chai_app` | The restricted role's name. |
@@ -296,6 +304,8 @@ app/
   auth.py        identity from the proxy header; the peer and secret checks
   access.py      roles (Level), the access checks, and the record of a denial
   accessaudit.py the read trail: what is recorded, and the export formats
+  agent.py       the read-only agent API, its allowlisted responses, token routes
+  agent_tokens.py agent tokens: mint, verify, revoke, and the opaque person id
   emergency.py   break-glass access, and its record in the project's own log
   db.py          asyncpg pool, DSN normalizing, migrations under a lock
   migrate.py     the one-shot migration job and the restricted role's grants
@@ -318,6 +328,7 @@ migrations/
   007_access_event.sql         the read trail
   008_retention.sql            retention policy, holds, dispose_due()
   009_principal_disposal.sql   staff names no retained record refers to
+  013_agent_tokens.sql         agent tokens, and the read trail marking agent access
 tests/
 ```
 

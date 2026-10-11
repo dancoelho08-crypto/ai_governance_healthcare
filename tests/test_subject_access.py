@@ -115,6 +115,10 @@ def seed(name: str) -> None:
         INSERT INTO retention_hold (project_id, by_id, action, reason) VALUES
           ('p1', 'dr.a@hosp.org', 'place', 'Records request'),
           ('p2', 'other@hosp.org', 'place', 'Deposition of dr.a@hosp.org');
+        INSERT INTO agent_token (token_id, secret_hash, principal_id, label,
+                                 created_at, expires_at)
+          VALUES ('0123456789abcdef', repeat('a', 64), 'dr.a@hosp.org', 'dr.a laptop',
+                  '2026-01-01T00:00:00Z', '2026-01-01T08:00:00Z');
         SELECT dispose_due('dr.a@hosp.org');
         """,
     )
@@ -166,6 +170,7 @@ def main() -> int:
             "project_version.doc", "project_version.access",
             "project_deletion.deleted_by", "access_event.actor", "principals",
             "retention_hold.by_id", "retention_hold.reason", "disposal_run.run_by",
+            "agent_token.principal_id",
         ):  # fmt: skip
             check(f"found in {loc}", found.get(loc, 0) >= 1, str(found))
         check(

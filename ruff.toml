@@ -21,6 +21,7 @@ select = [
 # dependency-injection idiom (`user: Identity = Depends(current_user)`), and
 # rewriting it to satisfy the rule would break the framework.
 "server/app/routes.py" = ["B008"]
+"server/app/agent.py" = ["B008"]
 # SIM117 wants nested `with` blocks combined. In the SSE tests the nesting is
 # meaningful -- an outer server fixture around an inner subscription -- and
 # flattening it obscures which context owns what.

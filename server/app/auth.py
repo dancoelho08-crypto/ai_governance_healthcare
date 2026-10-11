@@ -40,6 +40,11 @@ rather than a substitute for closing the port:
 Identity is never read from the request body, a query parameter, or a cookie.
 The audit log's ``by`` field is overwritten with the proxy identity on write
 for the same reason.
+
+One family of routes does not use any of this: the read-only agent API under
+``/api/agent/`` answers to a per-user bearer token and ignores the identity header
+(``app/agent.py``, #164). Nothing in this module reads a token, and no route that
+asks for an :class:`Identity` accepts one.
 """
 
 from __future__ import annotations
@@ -65,6 +70,7 @@ __all__ = [
     "ANONYMOUS",
     "DEV_BANNER",
     "Identity",
+    "check_network_locks",
     "identity_from_request",
     "log_auth_posture",
 ]
@@ -352,6 +358,17 @@ def _identity_from_plain(raw: str, request: Request, settings: Settings) -> Iden
     return Identity(id=user_id or email, name=name or email, email=email)
 
 
+def check_network_locks(request: Request, settings: Settings) -> None:
+    """The two second locks, ``TRUSTED_PROXY_CIDR`` then ``PROXY_SHARED_SECRET``.
+
+    Raises 403. The agent routes (#164) answer to a bearer token and not to an
+    identity header, but they sit behind the same proxy and must not be reachable
+    around it either, so they take the same two locks.
+    """
+    _check_peer(request, settings)
+    _check_shared_secret(request, settings)
+
+
 def identity_from_request(request: Request, settings: Settings) -> Identity:
     """Build an :class:`Identity`, or raise 401 / 403.
 
@@ -365,8 +382,7 @@ def identity_from_request(request: Request, settings: Settings) -> Identity:
     # it also switched off TRUSTED_PROXY_CIDR and PROXY_SHARED_SECRET, the two
     # things documented as defense in depth for exactly this situation. A dev
     # flag should weaken one layer, not all three.
-    _check_peer(request, settings)
-    _check_shared_secret(request, settings)
+    check_network_locks(request, settings)
 
     if settings.dev_insecure_auth:
         return Identity(

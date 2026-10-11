@@ -47,6 +47,7 @@ from .access import (
     can_read,
     guard_access_change,
     guard_owner_only_fields,
+    readable_rows,
     require,
 )
 from .accessaudit import AccessAction, ExportFormat, record_access
@@ -276,19 +277,9 @@ async def list_projects(
     # One transaction with its record (#33): there is no list without a row saying
     # who was given which projects, and a list that cannot be recorded is not served.
     async with db.acquire() as conn, conn.transaction():
-        rows = await conn.fetch(
-            "SELECT id, doc FROM projects ORDER BY updated_at DESC, id ASC"
+        visible = await readable_rows(
+            conn, identity.id, enforced=enforced, emergency=identity.emergency
         )
-        visible = [
-            row
-            for row in rows
-            if can_read(
-                row["doc"] or {},
-                identity.id,
-                enforced=enforced,
-                emergency=identity.emergency,
-            )
-        ]
         await record_access(
             conn,
             identity,
