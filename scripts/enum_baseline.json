@@ -18,8 +18,7 @@
       "not_found": 2,
       "permission_denied": 2,
       "quota_exceeded": 2,
-      "revoked": 1,
-      "unavailable": 1
+      "revoked": 1
     },
     "app/js/00-core/45-changelog.js": {
       "access": 1,

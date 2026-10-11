@@ -201,4 +201,4 @@ document.addEventListener("keydown",e=>{ if(e.key==="Escape") panel.classList.re
 window.addEventListener("pagehide",()=>{ Object.keys(pending).forEach(flush); });
 
 let toastT;
-function toast(msg){ const t=document.getElementById("toast"); t.textContent=msg; t.classList.add("show"); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove("show"),2400); }
+function toast(msg,ms){ const t=document.getElementById("toast"); t.textContent=msg; t.classList.add("show"); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove("show"),ms||2400); }

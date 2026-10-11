@@ -2746,6 +2746,46 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
   setup toggle, lede or note says five of anything, "in sequence" or a relay
   while it does not have five rows.
 
+### D-86 A save the server refused is not retried, and says why
+
+- Status: Proposed (the retry rule is the owner's request on #186; the
+  classification below, and what a refusal keeps and says, are this change's,
+  for the owner to accept)
+- **Three outcomes, by one function.** `classifyStatus()`
+  (`app/js/00-core/20-stores.js`) maps an HTTP status to a `SaveOutcome`: 401
+  and 403 are `DENIED`, 404 is `GONE`, 408, 429 and 5xx are `RETRY`, any other
+  4xx is `REFUSED`. A request that gets no response at all is `RETRY`; before
+  this it carried no code and was not retried, so the documented "retries on a
+  dropped connection" was not true of it either. `flush()` (`40-writes.js`)
+  branches on `err.outcome`, not on a status number or a string.
+- **A refusal is sent once.** The server understood and said no; the same bytes
+  get the same answer (a malformed value, a framework stamp it will not accept
+  (R-67), a lone surrogate, an oversize body, a conflict). The edit is restored
+  to `pending`, so it stays in the field and is merged with the person's next
+  correction, and the label says "Not saved: change refused", never "check your
+  connection" (the server is up).
+- **The server's reason is quoted, as text and capped.** `refusalDetail()` reads
+  FastAPI's string or list `detail`, collapses whitespace and cuts at 200
+  characters, because the text can be derived from the request. The toast shows
+  it with `textContent` (never markup) and lasts longer than the usual toast. The
+  reason is English, as server messages are (R-55); the sentence around it is
+  translated.
+- **Limit, stated:** a refused edit stays in `pending`, so the next save of that
+  project sends it again, merged with the new edit, and is refused again until the
+  person corrects the field. Correcting the same field overwrites the bad value,
+  which is the intent; an unrelated edit made first is held back by the same
+  refusal until then. The message names the server's reason each time.
+- **Rejected:** retrying a 4xx a few times "in case" (it never succeeds and delays
+  the message by the whole backoff); dropping the edit on refusal (the person
+  loses what they typed, which #186 and the comment on `flush()` exist to prevent);
+  showing the raw status text (it names no value to change); treating 409 as a
+  special case with its own message (it is a refusal like the others, and the
+  server's detail says what conflicts).
+- Source: #186; `tests/test_save_refused.py`.
+- Enforced by: `tests/test_save_refused.py` (each refused status sent once with
+  the edit kept; each transient failure sent six times; markup in the reason
+  shown as text; every language; six mutations of the built page each noticed).
+
 ### D-89 Agents read through per-user tokens the app mints
 
 - Status: Accepted for the owner's decisions 1 to 4 and 5 on #164 (2026-10-10);

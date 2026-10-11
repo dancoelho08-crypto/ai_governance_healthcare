@@ -45,20 +45,69 @@ class LocalStore{
 /* A row of a project's litigation-hold history (server/app/retention.py HoldAction). */
 const HoldAction = Object.freeze({ PLACE: "place", LIFT: "lift" });
 
+/* What a failed write means for the save loop (#186). RETRY: the server may
+   succeed later (5xx, no response, 408, 429). REFUSED: the server understood
+   and said no, and the same bytes will be refused again (a 422 for a malformed
+   value or a framework stamp it will not accept, 400, 409, 413): do not retry,
+   keep the edit, and say why. DENIED and GONE keep their own handling (access
+   changed, project deleted). */
+const SaveOutcome = Object.freeze({ RETRY: "retry", REFUSED: "refused", DENIED: "denied", GONE: "gone" });
+const HttpStatus = Object.freeze({   // enum-ok: HTTP's own status numbers
+  UNAUTHORIZED: 401, FORBIDDEN: 403, NOT_FOUND: 404, TIMEOUT: 408, TOO_MANY: 429, CLIENT_MIN: 400, SERVER_MIN: 500,
+});
+function classifyStatus(status){
+  if(status===HttpStatus.UNAUTHORIZED || status===HttpStatus.FORBIDDEN) return SaveOutcome.DENIED;
+  if(status===HttpStatus.NOT_FOUND) return SaveOutcome.GONE;
+  if(status===HttpStatus.TIMEOUT || status===HttpStatus.TOO_MANY) return SaveOutcome.RETRY;
+  if(status>=HttpStatus.CLIENT_MIN && status<HttpStatus.SERVER_MIN) return SaveOutcome.REFUSED;
+  return SaveOutcome.RETRY;
+}
+const REFUSAL_DETAIL_MAX = 200;
+/* The server's reason as one short plain string. FastAPI sends either
+   a detail string, or a detail list of objects with a loc path and a message. */
+function refusalDetail(body){
+  let d = body && body.detail;
+  if(Array.isArray(d)) d = d.map(x=>{
+    if(!x || typeof x!=="object") return String(x);
+    const where = Array.isArray(x.loc)
+      ? x.loc.filter(k=>k!=="body").join(".") : "";  // enum-ok: FastAPI's own loc segment
+    return [where, x.msg].filter(Boolean).join(": ");
+  }).join("; ");
+  if(typeof d!=="string") return "";
+  d = d.replace(/\s+/g," ").trim();
+  return d.length>REFUSAL_DETAIL_MAX ? d.slice(0,REFUSAL_DETAIL_MAX-1)+"\u2026" : d;
+}
+
 class ApiStore{
   constructor(base){ this.base=base||"/api"; this.es=null; this.cbs=[]; this.cache=[]; this.logDepth={}; this.logPulls={}; }
 
   async req(path,opts){
-    const r = await fetch(this.base+path, Object.assign({
-      headers:{"Content-Type":"application/json"}, credentials:"same-origin"
-    }, opts||{}));
+    let r;
+    try{
+      r = await fetch(this.base+path, Object.assign({
+        headers:{"Content-Type":"application/json"}, credentials:"same-origin"
+      }, opts||{}));
+    }catch(e){
+      // No response at all (offline, DNS, a dropped connection): transient.
+      const err = new Error(String(e&&e.message||e));
+      err.code = "unavailable"; err.outcome = SaveOutcome.RETRY;
+      throw err;
+    }
     if(!r.ok){
       // Surface the API's own code so onDbError can tell a permission problem
       // from a conflict; the app already distinguishes them.
       const err = new Error(`${r.status} ${r.statusText}`);
+      err.status = r.status;
+      err.outcome = classifyStatus(r.status);
       err.code = r.status===403||r.status===401 ? "permission_denied"
                : r.status===409 ? "already_exists"
                : r.status===404 ? "not_found" : "unavailable";
+      if(err.outcome===SaveOutcome.REFUSED){
+        // Only a refusal needs the server's words: they say what to change.
+        // The text is request-derived, so it is only ever shown as text.
+        let body=null; try{ body = await r.json(); }catch(e){}
+        err.detail = refusalDetail(body);
+      }
       throw err;
     }
     return r.status===204 ? null : r.json();
