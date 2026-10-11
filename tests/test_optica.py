@@ -102,7 +102,7 @@ def run() -> list[str]:
 
         # #174: each item's chip shows the first CHAI criterion its definition
         # lists, and names them all; an item with none (5.3 and 7.4 among them,
-        # not yet recorded, R-69) shows as not covered.
+        # OPTICA-only, R-69) shows as not covered.
         wrong: list[str] = []
         for section in OPTICA_DEF["sections"]:
             page.evaluate(f"go('o{section['n']}')")
@@ -127,7 +127,7 @@ def run() -> list[str]:
         page.wait_for_timeout(100)
         chip = page.query_selector('li[data-item="5-3"] .ci-row .pchip')
         check(
-            "5.3, not yet recorded, shows as not covered by CHAI",
+            "5.3, OPTICA-only, shows as not covered by CHAI",
             chip is not None
             and chip.text_content() == "—"
             and chip.get_attribute("title") == not_covered,

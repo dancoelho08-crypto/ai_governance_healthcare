@@ -1072,26 +1072,30 @@ honest answer and is a gap worth closing; see R-19.
 
 ### R-69 Which CHAI criteria do OPTICA 5.3 and 7.4 cite?
 
-- Status: Open
-- docs/crosswalk.md moves OPTICA 5.3 and 7.4 from OPTICA-only to partial, but
-  names no CHAI criterion for either. The page narrows them: 5.3 cites exactly
-  one of s2-1, s2-2, s3-2, s3-4, s4-6 or s6-3 (s6-3 would also add CHAI stage
-  s6 to chapter 5's stage set, which the page lists as s2; s1 s3 s4); 7.4 cites
-  from s3-1, s3-2 and s4-3. The owner has decided (2026-10-10) to leave both
-  unresolved for now.
-- Until answered: OPTICA's definition keeps 5.3 and 7.4 OPTICA-only with no
-  criteria, so the dashboard shows them as not covered by CHAI, and the page
-  says so in its section 7, citing this entry. Do not record a criterion for
-  either, and do not write documentation or UI copy that names one.
-- When answered: record the criteria in `app/frameworks/optica/framework.json`
-  and take both items out of the page's "not yet recorded" sentence.
-  `pixi run check-crosswalk` accepts that sentence only while this entry's status
-  is Open, so answering it without recording them fails the check.
+- Status: **Answered** (2026-10-10, the owner's decision on #174): drop the
+  claim. OPTICA 5.3 and 7.4 are OPTICA-only, on the page as in the definition.
+- The question: docs/crosswalk.md moved OPTICA 5.3 and 7.4 from OPTICA-only to
+  partial, but named no CHAI criterion for either. The page narrowed them: 5.3
+  cited exactly one of s2-1, s2-2, s3-2, s3-4, s4-6 or s6-3 (s6-3 would also
+  have added CHAI stage s6 to chapter 5's stage set, which the page lists as s2;
+  s1 s3 s4); 7.4 cited from s3-1, s3-2 and s4-3.
+- The answer: the owner decided (2026-10-10, final) to drop the claim. Both
+  items are OPTICA-only on the page and in OPTICA's definition, which records no
+  criterion for either. The page no longer says they are partial or "not yet
+  recorded", and its counts are the definition's (59 partial, 18 OPTICA-only;
+  chapter 5 cites six criteria and has one unanchored item; chapter 7 has four).
+  No criterion is named for either, and none is to be guessed.
+- Constraint going forward: do not write on the page, in documentation or in UI
+  copy that 5.3 or 7.4 is partial, or that either cites a CHAI criterion. To
+  change that, the owner would have to say which criteria, and the definition
+  and the page are then changed together.
 - Source: docs/crosswalk.md (sections 1 and 2); the owner's answer in the #174
   session (2026-10-10); DECISIONS D-84.
-- Enforced by: `scripts/gen_crosswalk.py --check` (`pixi run check-crosswalk`) and
-  `tests/test_crosswalk.py`, which shows the check failing when this entry is
-  answered while the items are still unrecorded.
+- Enforced by: `scripts/gen_crosswalk.py --check` (`pixi run check-crosswalk`),
+  which demands exact counts everywhere, refuses any page sentence saying items
+  are "partial on this page" or "not yet recorded", and refuses a page that
+  disagrees with the definition on either item; `tests/test_crosswalk.py`
+  shows each of those failing.
 
 ### R-61 Evidence is referenced, never uploaded
 
