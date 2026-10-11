@@ -85,6 +85,7 @@ function scrubAddressCredentials(v, depth = 0){
   if(!v || typeof v !== "object" || depth > 64) return {value: v, removed: 0};
   let removed = 0;
   for(const k of Object.keys(v)){
+    if(!safeKey(k)) continue;   // an own "__proto__" or "constructor" is never written through
     const r = scrubAddressCredentials(v[k], depth + 1);
     if(r.removed){ v[k] = r.value; removed += r.removed; }
   }

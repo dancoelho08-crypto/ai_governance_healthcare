@@ -46,7 +46,7 @@ async function flush(pid,attempt){
     const n=(attempt||0)+1;
 
     // Transient: keep the edit and come back for it.
-    if(c==="unavailable" && n < MAX_SAVE_ATTEMPTS){
+    if(e && e.outcome===SaveOutcome.RETRY && n < MAX_SAVE_ATTEMPTS){
       restore();
       flushing[pid]=false;
       setSaved(t("saved.retrying"));
@@ -57,7 +57,14 @@ async function flush(pid,attempt){
     // Permanent, and about permission rather than connectivity. Keep the
     // edit anyway: the user can still see and copy what they wrote, which
     // they cannot do if we drop it.
-    if(c==="permission_denied" || c==="invalid_argument" || c==="revoked"){
+    if(e && e.outcome===SaveOutcome.REFUSED){
+      // The server is up and said no (#186). The same bytes would be refused
+      // again, so there is no retry; keep the edit so it can be corrected.
+      restore();
+      toast(e.detail ? t("toast.saveRefused",{detail:e.detail}) : t("toast.saveRefusedBare"), 8000);
+      setSaved(t("saved.refused"));
+    }
+    else if(c==="permission_denied" || c==="invalid_argument" || c==="revoked"){
       restore();
       setReadOnly(true);
       toast(t("toast.accessChanged"));

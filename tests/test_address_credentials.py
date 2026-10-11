@@ -50,8 +50,8 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 # A password no sentence here contains, so finding it anywhere means it leaked.
 USER = "usr"
-SECRET = "S3cr3tPw"
-WITH = f"https://{USER}:{SECRET}@h.example/x?e=a@b.c"
+CANARY = "S3cr3tPw"
+WITH = f"https://{USER}:{CANARY}@h.example/x?e=a@b.c"
 CLEAN = "https://h.example/x?e=a@b.c"
 TYPED = f"see {WITH} end"
 TYPED_CLEAN = f"see {CLEAN} end"
@@ -180,7 +180,38 @@ def run_table(page) -> list[str]:
     for (raw, want, n), (text, removed, again) in zip(CASES, got, strict=True):
         if text != want or removed != n or again != 0:
             bad.append(f"{raw!r}: {text!r}/{removed}/{again} (want {want!r}/{n}/0)")
+    bad += unsafe_key_problems(page)
     return bad
+
+
+def unsafe_key_problems(page) -> list[str]:
+    """An object read from a file (a JSON import) can carry its own "__proto__" or
+    "constructor". The scrubber never writes through such a key (CodeQL
+    js/prototype-pollution-utility, #194): the value under it is left as it is, and
+    the ordinary fields beside it are still cleaned."""
+    got = page.evaluate(
+        """(addr) => {
+          const o = JSON.parse('{"__proto__": {"x": "' + addr + '"},'
+            + ' "constructor": {"y": "' + addr + '"}, "ok": "' + addr + '"}');
+          const r = scrubAddressCredentials(o);
+          return {
+            proto: Object.getOwnPropertyDescriptor(o, "__proto__").value.x,
+            ctor: o.constructor.y,
+            ok: o.ok,
+            removed: r.removed,
+            polluted: ({}).x !== undefined || ({}).y !== undefined,
+          };
+        }""",
+        WITH,
+    )
+    out = []
+    if got["proto"] != WITH or got["ctor"] != WITH:
+        out.append(f"a value under an unsafe key was written through: {got}")
+    if "@h.example" in got["ok"]:
+        out.append(f"the ordinary field was not cleaned: {got}")
+    if got["removed"] != 1 or got["polluted"]:
+        out.append(f"count or pollution wrong: {got}")
+    return out
 
 
 # ---- what a renderer does --------------------------------------------------------
@@ -352,6 +383,11 @@ RULE_MUTATIONS = [
         "",
     ),
     (
+        "the unsafe-key guard removed (a value written through __proto__)",
+        "    if(!safeKey(k)) continue;",
+        "",
+    ),
+    (
         "a scheme longer than 31 characters not matched",
         "{0,31}",
         "{0,3}",
@@ -387,9 +423,9 @@ def rule_mutations(browser, source: str, work: Path) -> None:
 
 # ---- the page, as a person uses it -----------------------------------------------
 
-DEEP_FIND = """(secret) => {
+DEEP_FIND = """(canary) => {
   const hits = [];
-  const look = (name, text) => { if (String(text).includes(secret)) hits.push(name); };
+  const look = (name, text) => { if (String(text).includes(canary)) hits.push(name); };
   look('the open record', JSON.stringify(S));
   look('the stored record', JSON.stringify(storedRecord(S)));
   look('the pending patch', JSON.stringify(pending));
@@ -484,7 +520,7 @@ def entry_checks(browser) -> dict[str, str]:
     )
     wait_until(page, DRAINED, 10)
     page.wait_for_timeout(900)
-    leaks = page.evaluate(DEEP_FIND, SECRET)
+    leaks = page.evaluate(DEEP_FIND, CANARY)
     check(
         "the password is nowhere: not the record, the history, the queue or storage",
         not leaks,
@@ -537,8 +573,8 @@ def typing_checks(browser) -> None:
     page.wait_for_timeout(900)
     check(
         "no password in the history or storage",
-        not page.evaluate(DEEP_FIND, SECRET),
-        str(page.evaluate(DEEP_FIND, SECRET)),
+        not page.evaluate(DEEP_FIND, CANARY),
+        str(page.evaluate(DEEP_FIND, CANARY)),
     )
     ctx.close()
 
@@ -572,7 +608,7 @@ def other_entry_checks(browser) -> None:
         page.inner_text("#toast"),
     )
     wait_until(page, DRAINED, 10)
-    check("no password anywhere", not page.evaluate(DEEP_FIND, SECRET))
+    check("no password anywhere", not page.evaluate(DEEP_FIND, CANARY))
 
     # A new project's name.
     page.evaluate("goHome()")
@@ -589,7 +625,7 @@ def other_entry_checks(browser) -> None:
         "[...PROJECTS.values()].find(p => p.meta.solution.startsWith('Name ')).meta.solution"  # noqa: E501
     )
     check("a new project's name loses the credentials", name == f"Name {CLEAN}", name)
-    check("no password anywhere", not page.evaluate(DEEP_FIND, SECRET))
+    check("no password anywhere", not page.evaluate(DEEP_FIND, CANARY))
 
     # A litigation-hold reason: written to the server only, so the store is given
     # a place to receive it (the way tests/test_injection.py does).
@@ -650,7 +686,7 @@ def history_checks(browser) -> None:
         "LOG.filter(e => e.change).map(e => e.text + JSON.stringify(e.change))"
     )
     check("the edit is in the history", len(entries) >= 1, str(entries))
-    leaks = [e for e in entries if SECRET in e]
+    leaks = [e for e in entries if CANARY in e]
     check(
         "and holds no password, in its words or its from and to", not leaks, str(leaks)
     )
@@ -709,7 +745,7 @@ def import_checks(browser, fields: dict[str, str]) -> None:
     )
     wait_until(page, DRAINED, 10)
     page.wait_for_timeout(200)
-    leaks = page.evaluate(DEEP_FIND, SECRET)
+    leaks = page.evaluate(DEEP_FIND, CANARY)
     check("the password is nowhere after the import", not leaks, str(leaks))
     ctx.close()
 
@@ -746,7 +782,7 @@ def import_checks(browser, fields: dict[str, str]) -> None:
         page.inner_text("#toast"),
     )
     wait_until(page, DRAINED, 10)
-    leaks = [h for h in page.evaluate(DEEP_FIND, SECRET) if h != "browser storage"]
+    leaks = [h for h in page.evaluate(DEEP_FIND, CANARY) if h != "browser storage"]
     check("the password is nowhere in the page's records", not leaks, str(leaks))
     ctx.close()
 
@@ -807,9 +843,9 @@ def export_report(browser) -> None:
     md = out["md"]
     check(
         "the planted record holds the credentials (not vacuous)",
-        SECRET in out["stored"],
+        CANARY in out["stored"],
     )
-    check("the Markdown report has no password", SECRET not in md, "found")
+    check("the Markdown report has no password", CANARY not in md, "found")
     check("nor a user name before an @ in an address", f"{USER}:" not in md)
     check(
         "but still has the address, without them",
@@ -829,7 +865,7 @@ def export_report(browser) -> None:
     j = json.loads(out["json"])
     check(
         "the JSON export keeps the stored text, as its contract says",
-        SECRET in out["json"] and SECRET in json.dumps(j["_state"]),
+        CANARY in out["json"] and CANARY in json.dumps(j["_state"]),
     )
     check(
         "the JSON export's _state is the stored record",
@@ -919,7 +955,7 @@ def entry_mutations(browser, source: str, work: Path) -> None:
                 page.evaluate(PASTE, ["meta.org", "changed"])
                 wait_until(page, DRAINED, 10)
                 noticed = any(
-                    SECRET in e
+                    CANARY in e
                     for e in page.evaluate(
                         "LOG.filter(e => e.change).map(e => e.text + JSON.stringify(e.change))"  # noqa: E501
                     )

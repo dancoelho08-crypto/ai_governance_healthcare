@@ -75,6 +75,16 @@ identity, so there is nothing to fill in. The header should say
 **Shared workspace**. If it says *This browser only*, the API is not answering;
 run `make doctor` in another terminal, or look at `make logs`.
 
+When a save does not go through, the page says which kind of problem it is. If
+the server cannot be reached or is failing (a dropped connection, a 5xx, a 408 or
+a 429), it keeps your edit and retries six times, backing off, then tells you to
+check your connection. If the server is up and *refuses* the change (a 4xx other
+than those, such as a 422 for a value it will not accept), it does not retry,
+because the same change would be refused again. It keeps your edit in the field,
+shows the server's reason, and marks the project *Not saved: change refused*, so
+you can correct the value. Losing access (401, 403) and a deleted project (404)
+are reported as before.
+
 !!! warning "The development stack mints one fixed identity"
 
     Locally the proxy sets a single development identity for every request, so
