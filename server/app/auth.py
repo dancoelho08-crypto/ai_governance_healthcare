@@ -154,11 +154,15 @@ def log_auth_posture(settings: Settings) -> None:
 
 def _networks(cidrs: list[str]) -> list[ipaddress._BaseNetwork]:
     nets = []
-    for cidr in cidrs:
+    for n, cidr in enumerate(cidrs, start=1):
         try:
             nets.append(ipaddress.ip_network(cidr, strict=False))
         except ValueError:
-            log.error("ignoring unparseable TRUSTED_PROXY_CIDR entry %r", cidr)
+            # By position, not value: the entry is operator configuration that
+            # travels with the settings object, which also holds secrets.
+            log.error(
+                "ignoring unparseable TRUSTED_PROXY_CIDR entry %d of %d", n, len(cidrs)
+            )
     return nets
 
 
