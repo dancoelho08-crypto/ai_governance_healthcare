@@ -2570,8 +2570,10 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
   (`app/frameworks/optica/docs.toml`), which stops being checked if that
   sentence is reworded. The page's item-by-item attributions in prose (which
   item supplies which criterion in the section 3 and section 6 lists) are not
-  checked; some of them disagree with the definition and are tracked in the
-  follow-up issue.
+  checked. Four of them disagreed with the definition (s1-6 at 12.5, s2-3 at
+  7.2, s2-4 at 7.7, and s1-6 "across 10.3, 12.5 and 13.1"); the owner decided
+  (#191, 2026-10-10) to remove those claims rather than correct them, and they
+  are gone from the page. Attributions that remain are still not checked.
 - **What the check cannot derive, and so does not claim.** The reviewer's
   grading of each CHAI criterion as reached, touched or absent is not in the
   definition. The check holds it to itself and to what is cited: the stage
