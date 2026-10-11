@@ -163,15 +163,18 @@ recent approval.
 
 OPTICA asks a different question from CHAI: not "is this being run responsibly?"
 but "should this organization adopt this solution?". Switched on for a project,
-it adds 77 questions in 13 chapters, answered by five stakeholders in sequence:
-the clinical expert, the AI solution developer, the organization's data lead, an
-MLOps expert and the organization's AI lead.
+it adds 77 questions in 13 chapters. OPTICA's own procedure has five
+stakeholders (the clinical expert, the AI solution developer, the organization's
+data lead, an MLOps expert and the organization's AI lead) complete them in
+seven stages; the dashboard does not show that. It groups the questions by
+whether your organization, the solution's developer or either party can answer
+them.
 
 The questions are this project's paraphrase of OPTICA's. Each shows which CHAI
-criterion partly covers it, or that none does, and the overview lists who owes
-the next answers. **OPTICA answers never change a CHAI status**: no OPTICA item
-fully discharges a CHAI criterion, so evidence can be cited in both but a
-judgment in one is never a judgment in the other. See the
+criterion partly covers it, or that none does, and the overview lists the
+outstanding questions under those three. **OPTICA answers never change a CHAI
+status**: no OPTICA item fully discharges a CHAI criterion, so evidence can be
+cited in both but a judgment in one is never a judgment in the other. See the
 [crosswalk](crosswalk.md).
 
 ## 6. Read the portfolio

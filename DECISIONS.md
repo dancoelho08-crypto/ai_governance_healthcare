@@ -2570,8 +2570,10 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
   (`app/frameworks/optica/docs.toml`), which stops being checked if that
   sentence is reworded. The page's item-by-item attributions in prose (which
   item supplies which criterion in the section 3 and section 6 lists) are not
-  checked; some of them disagree with the definition and are tracked in the
-  follow-up issue.
+  checked. Four of them disagreed with the definition (s1-6 at 12.5, s2-3 at
+  7.2, s2-4 at 7.7, and s1-6 "across 10.3, 12.5 and 13.1"); the owner decided
+  (#191, 2026-10-10) to remove those claims rather than correct them, and they
+  are gone from the page. Attributions that remain are still not checked.
 - **What the check cannot derive, and so does not claim.** The reviewer's
   grading of each CHAI criterion as reached, touched or absent is not in the
   definition. The check holds it to itself and to what is cited: the stage
@@ -2700,6 +2702,49 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
   build; and mutations of the built page (escaping removed, newlines kept,
   angle brackets or a pipe unescaped, `mdInlineMarkdown` writing raw text or any
   link) each rejected.
+
+### D-87 OPTICA's overview says what it groups by, not five stakeholders in sequence
+
+- Status: Proposed (built for #175; the owner has not yet confirmed it)
+- **The problem.** The OPTICA overview's lede ("answered by five stakeholders in
+  sequence"), its "who owes the next answers" note ("OPTICA is a relay: each stage
+  is completed by one stakeholder before the next begins"), its column header
+  ("Stakeholder") and the setup toggle ("answered by five stakeholders") described
+  OPTICA's own procedure, while the table groups items by `who`, a three-valued
+  producer (adopter, developer, either), sorted by item count. The screen showed
+  neither five stakeholders nor stages. Found by the #168 coupling map.
+- **What the definition holds.** Every item has `attrs.stakeholder` (five distinct
+  values: clinical expert 33, AI solution developer 29, organizational data lead
+  7, MLOps expert 5, organizational AI lead 3) and `attrs.stage` (A-G). They are
+  English strings in the data, in no catalog, and no screen reads them.
+- **Decision: the words describe what is shown.** The lede states the size and
+  the question OPTICA asks; the note says outstanding items are listed by who can
+  answer them (your organization, the solution's developer, or either party); the
+  column is "Who answers" (key `optica.col.who`, was `optica.col.stakeholder`);
+  the toggle says "77 adoption questions in 13 chapters". All eight languages
+  are machine-drafted. None of these keys is safety-bearing (`"@meta".safety`
+  lists warnings, disclaimers and provenance, not these), so no zh-Hans reviewer
+  record applies or is lost (R-55). `docs/guide.md`, `README.md` and
+  `docs/frameworks/optica.md` say the dashboard does not show the five
+  stakeholders or the stages; the procedure itself, as the paper states it, is
+  unchanged on the framework page.
+- **Rejected: show the five stakeholders and the stages.** It needs a way for a
+  definition to name the attribute a screen groups by (a schema and engine change
+  under D-75 and D-77), translated names for the five stakeholders and seven
+  stages (new reviewer-facing content, D-78), and a decision on whether the
+  adopting organization's three roles become one row each. It is a feature,
+  not a correction, and nothing here is blocked on it. Left for the owner to
+  ask for.
+- **Rejected: change the data to three stakeholders.** The five stakeholders are
+  OPTICA's, not ours, and the crosswalk page cites them (D-84).
+- **Rejected: keep the text and add a footnote.** The sentence would still be
+  false of the screen it heads.
+- Source: #175; the #168 coupling map; docs/frameworks/optica.md; D-75; D-77.
+- Enforced by: `tests/test_optica.py` (`pixi run test-app`, CI's app job): in
+  every language the overview has one row per `who` value in the definition,
+  labeled by that value's own catalog text, and neither the overview nor the
+  setup toggle, lede or note says five of anything, "in sequence" or a relay
+  while it does not have five rows.
 
 ### D-89 Agents read through per-user tokens the app mints
 

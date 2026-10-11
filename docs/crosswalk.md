@@ -253,14 +253,13 @@ and nine more are touched only in fragments.
 
 | CHAI id | Track | What OPTICA supplies, and what it leaves out    |
 | ------- | ----- | ----------------------------------------------- |
-| s1-6    | T     | Clinical accountability for a result (10.3) and |
-|         |       | a receiving governance body (12.5); no          |
-|         |       | program owner, no decision rights             |
-| s2-3    | F     | Subgroup adequacy in development data (3.5) and |
-|         |       | vendor strata (7.2); no pre-specified fairness  |
-|         |       | criteria for the adopter's own evaluation       |
+| s1-6    | T     | Clinical accountability for a result (10.3); no |
+|         |       | program owner, no decision rights               |
+| s2-3    | F     | Subgroup adequacy in development data (3.5); no |
+|         |       | pre-specified fairness criteria for the         |
+|         |       | adopter's own evaluation                        |
 | s2-4    | S     | Thresholds everywhere, but as adoption          |
-|         |       | acceptance bars (1.5, 7.7); the model's         |
+|         |       | acceptance bars (1.5); the model's              |
 |         |       | operating point is never defined or justified   |
 | s5-1    | U     | Site-by-site phasing (12.3); no pilot duration, |
 |         |       | no stop rules                                   |
@@ -461,8 +460,7 @@ report them as covered.
    reporting plan is an effectiveness channel to a governance body, not a
    safety channel.
 3. Name the accountable program owner, the governance body and the decision
-   rights (s1-6), which OPTICA distributes across 10.3, 12.5 and 13.1 without
-   ever consolidating.
+   rights (s1-6), which OPTICA never consolidates.
 4. Stratify results by patient group after adoption: pilot results (s5-4) and
    ongoing monitoring (s6-2). All of OPTICA's equity work (3.5, 6.5, 7.2) sits
    before the purchase decision and most of it on the vendor's side.
