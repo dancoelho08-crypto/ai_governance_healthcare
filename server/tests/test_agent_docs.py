@@ -43,6 +43,7 @@ from .conftest import make_settings, requires_db
 from .test_agent_api import (
     ALICE,
     SECRET,
+    R,
     access,
     as_agent,
     as_user,
@@ -62,7 +63,7 @@ HEADING = re.compile(r"^### `(GET|POST|DELETE) (/api/\S+)`\s*$", re.M)
 OPERATIONS = [
     ("GET", "/api/agent/me"),
     ("GET", "/api/agent/portfolio"),
-    ("GET", "/api/agent/projects/{project_id}"),
+    ("GET", "/api/agent/projects/{ref}"),
     ("POST", "/api/agent-tokens"),
     ("GET", "/api/agent-tokens"),
     ("DELETE", "/api/agent-tokens/{token_id}"),
@@ -151,6 +152,7 @@ def settings():
         agent_id_secret=SECRET,
         rate_limit_max_requests=100_000,
         agent_rate_limit_max_requests=100_000,
+        agent_failure_rate_limit_max_requests=100_000,
     )
 
 
@@ -230,20 +232,20 @@ async def test_every_documented_status_is_one_the_route_returns(client) -> None:
     me, pf, pj = (
         "/api/agent/me",
         "/api/agent/portfolio",
-        "/api/agent/projects/{project_id}",
+        "/api/agent/projects/{ref}",
     )
     async with as_agent(client, minted["token"]) as agent:
         got("GET", me, await agent.get("/api/agent/me"))
         got("GET", pf, await agent.get("/api/agent/portfolio"))
         got("GET", pf, await agent.get("/api/agent/portfolio?limit=0"))
-        got("GET", pj, await agent.get("/api/agent/projects/p"))
-        got("GET", pj, await agent.get("/api/agent/projects/nope"))
+        got("GET", pj, await agent.get(f"/api/agent/projects/{R('p')}"))
+        got("GET", pj, await agent.get(f"/api/agent/projects/{R('nope')}"))
         got("GET", pj, await agent.get("/api/agent/projects/a%20b"))
     async with as_agent(client, None) as nobody:
         for method, path, url in (
             ("GET", me, "/api/agent/me"),
             ("GET", pf, "/api/agent/portfolio"),
-            ("GET", pj, "/api/agent/projects/p"),
+            ("GET", pj, f"/api/agent/projects/{R('p')}"),
         ):
             got(method, path, await nobody.get(url))
     async with as_user(client, ALICE) as session:
@@ -307,7 +309,7 @@ async def test_every_documented_status_is_one_the_route_returns(client) -> None:
         for method, path, url in (
             ("GET", me, "/api/agent/me"),
             ("GET", pf, "/api/agent/portfolio"),
-            ("GET", pj, "/api/agent/projects/p"),
+            ("GET", pj, f"/api/agent/projects/{R('p')}"),
         ):
             async with as_agent(locked, "agt_" + "0" * 16 + "." + "A" * 43) as a:
                 got(method, path, await a.get(url))
@@ -318,7 +320,7 @@ async def test_every_documented_status_is_one_the_route_returns(client) -> None:
             for method, path, url in (
                 ("GET", me, "/api/agent/me"),
                 ("GET", pf, "/api/agent/portfolio"),
-                ("GET", pj, "/api/agent/projects/p"),
+                ("GET", pj, f"/api/agent/projects/{R('p')}"),
             ):
                 got(method, path, await a.get(url))
         async with as_user(off, ALICE) as s:
@@ -330,12 +332,14 @@ async def test_every_documented_status_is_one_the_route_returns(client) -> None:
                 await s.delete(f"/api/agent-tokens/{'0' * 16}"),
             )
     async with running(
-        rate_limit_max_requests=1, agent_rate_limit_max_requests=1
+        rate_limit_max_requests=1,
+        agent_rate_limit_max_requests=1,
+        agent_failure_rate_limit_max_requests=1,
     ) as tight:
         for method, path, url in (
             ("GET", me, "/api/agent/me"),
             ("GET", pf, "/api/agent/portfolio"),
-            ("GET", pj, "/api/agent/projects/p"),
+            ("GET", pj, f"/api/agent/projects/{R('p')}"),
         ):
             async with as_agent(tight, "agt_" + "1" * 16 + "." + "A" * 43) as a:
                 await a.get(url)
@@ -437,7 +441,7 @@ async def test_every_documented_curl_command_works_as_documented(client) -> None
             for var, value in sorted(state.items(), key=lambda kv: -len(kv[0])):
                 path = path.replace(f"${var}", value)
                 headers = {k: v.replace(f"${var}", value) for k, v in headers.items()}
-            path = path.replace("$PROJECT_ID", "p1")
+            path = path.replace("$PROJECT_REF", R("p1"))
             if "$" in path or any("$" in v for v in headers.values()):
                 owner = (
                     await bare.get(
@@ -480,7 +484,7 @@ async def test_every_documented_curl_command_works_as_documented(client) -> None
     assert {
         "GET /api/agent/me",
         "GET /api/agent/portfolio",
-        "GET /api/agent/projects/p1",
+        f"GET /api/agent/projects/{R('p1')}",
     } <= set(ran)
     # The filters in the examples reached the data: the overdue one matched.
     assert ran.count("GET /api/agent/portfolio") == 5
@@ -521,17 +525,23 @@ def test_the_limits_on_the_page_are_the_codes() -> None:
         f"| `AGENT_MAX_ACTIVE_TOKENS` | `{defaults.agent_max_active_tokens}` |" in text
     )
     assert (
-        f"Each token may make {defaults.agent_rate_limit_max_requests} calls per {defaults.rate_limit_window_seconds} seconds"
+        f"A working token** may make {defaults.agent_rate_limit_max_requests} calls per {defaults.rate_limit_window_seconds} seconds"
         in text
     )
     assert f"({defaults.rate_limit_max_requests})" in text
+    failures = defaults.agent_failure_rate_limit_max_requests
+    assert f"up to {failures} per window" in text
+    assert f"| `AGENT_FAILURE_RATE_LIMIT_MAX_REQUESTS` | `{failures}` |" in text
+    from app.agent_limits import REFUSAL_ROWS_PER_WINDOW
+
+    assert f"at most {REFUSAL_ROWS_PER_WINDOW} per token id" in text
     assert defaults.agent_id_secret == "" and not defaults.agent_api_enabled
 
 
 def test_every_documented_setting_is_read_listed_and_passed_on() -> None:
     names = sorted(set(re.findall(r"`(AGENT_[A-Z_]+)`", TEXT)))
     assert names == [
-        "AGENT_EXTRA_VALUES",
+        "AGENT_FAILURE_RATE_LIMIT_MAX_REQUESTS",
         "AGENT_ID_SECRET",
         "AGENT_MAX_ACTIVE_TOKENS",
         "AGENT_RATE_LIMIT_MAX_REQUESTS",

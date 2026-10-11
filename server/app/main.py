@@ -24,10 +24,8 @@ while the real peer is what the app sees.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
-from collections import defaultdict, deque
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -41,21 +39,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.requests import ClientDisconnect
 
-from .accessaudit import source_of
 from .agent import agent_router, is_agent_path, token_router
-from .agent_tokens import parse_bearer
+from .agent_limits import AgentGuard
 from .auth import log_auth_posture
 from .config import Settings
 from .db import Database
 from .emergency import EmergencyAudit
 from .events import EventBroker
 from .principals import PrincipalRecorder
+from .ratelimit import SlidingWindowRateLimiter
 from .retirement import (
     ManifestError,
     RulesRefused,
     describe_sync,
     load_manifest,
     sync_rules,
+    sync_vocabulary,
 )
 from .roles import DbRole
 from .routes import router
@@ -70,85 +69,6 @@ API_CSP = (
     "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
 )
 HSTS_VALUE = "max-age=31536000; includeSubDomains"
-
-
-class SlidingWindowRateLimiter:
-    """Per-key request accounting over a moving window.
-
-    Named for what it does: entries are discarded once they fall outside
-    ``window_seconds`` of *now*, so the window slides. A true fixed window
-    resets on a wall-clock boundary and lets a caller spend two full
-    allowances across it.
-
-    **In-process, and so per-replica.** With N replicas behind a load
-    balancer the effective ceiling is N x ``max_requests``, because nothing is
-    shared between them. That is a deliberate trade: a shared counter means
-    Redis, or a round trip to PostgreSQL on every request, and this limiter
-    exists to blunt a runaway client rather than to meter an API. Size the
-    limit for one replica and treat the total as approximate. The hard
-    protections are elsewhere -- the body cap below, the SSE stream cap, and
-    the network isolation that keeps unauthenticated traffic out entirely.
-
-    **Bounded memory.** Keys are swept once per window. Without that the
-    dictionary grew by one entry for every distinct identity or source
-    address ever seen and never shrank, which for IP-keyed traffic is an
-    attacker-controlled leak: 200k addresses meant 200k permanently retained
-    keys.
-    """
-
-    def __init__(
-        self,
-        window_seconds: int,
-        max_requests: int,
-        *,
-        max_keys: int = 50_000,
-    ) -> None:
-        self.window_seconds = max(1, window_seconds)
-        self.max_requests = max(1, max_requests)
-        self.max_keys = max(1, max_keys)
-        self._events: dict[str, deque[float]] = defaultdict(deque)
-        self._lock = asyncio.Lock()
-        self._last_sweep = time.monotonic()
-
-    def _sweep(self, now: float) -> None:
-        """Drop keys with nothing left inside the window. Caller holds the lock."""
-        cutoff = now - self.window_seconds
-        stale = [
-            key
-            for key, bucket in self._events.items()
-            if not bucket or bucket[-1] <= cutoff
-        ]
-        for key in stale:
-            del self._events[key]
-        self._last_sweep = now
-        if len(self._events) > self.max_keys:
-            # Everything here is live traffic inside one window, so this is a
-            # flood from many sources rather than accumulated residue. Say so
-            # once per sweep; the limiter keeps working.
-            log.warning(
-                "rate limiter is tracking %d active keys (above max_keys=%d); "
-                "this looks like distributed traffic rather than one client",
-                len(self._events),
-                self.max_keys,
-            )
-
-    async def allow(self, key: str) -> bool:
-        now = time.monotonic()
-        cutoff = now - self.window_seconds
-        async with self._lock:
-            if now - self._last_sweep >= self.window_seconds:
-                self._sweep(now)
-            bucket = self._events[key]
-            while bucket and bucket[0] <= cutoff:
-                bucket.popleft()
-            if len(bucket) >= self.max_requests:
-                return False
-            bucket.append(now)
-            return True
-
-    @property
-    def tracked_keys(self) -> int:
-        return len(self._events)
 
 
 # Kept so an operator's existing import or reference does not break.
@@ -299,7 +219,8 @@ async def migrate_and_sync(db: Database, settings: Settings) -> None:
             "retires by what it holds (010's seed, CHAI's rules, unless an earlier "
             "sync recorded others) and /api/health "
             "reports retirement_rules.synced=false. Set RETIREMENT_MANIFEST to the "
-            "build's manifest.json, or run `python -m app.migrate` (D-76)."
+            "build's manifest.json, or run `python -m app.migrate` (D-76). The agent "
+            "vocabulary (agent_vocabulary, D-89) was not refreshed either."
         )
         return
     async with db.acquire() as conn:
@@ -307,6 +228,7 @@ async def migrate_and_sync(db: Database, settings: Settings) -> None:
             synced = await sync_rules(conn, manifest, settings.retirement_rules_ack)
         except RulesRefused as exc:
             raise RuntimeError(f"retirement rules refused: {exc}") from exc
+        await sync_vocabulary(conn, manifest)
     log.info("%s", describe_sync(synced, manifest))
 
 
@@ -370,6 +292,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         log.info("shutting down")
+        app.state.agent_guard.flush()
         await broker.stop()
         await db.close()
 
@@ -407,13 +330,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings.rate_limit_window_seconds,
         settings.rate_limit_max_requests,
     )
-    # Agent tokens get their own, lower limit (#164). It is keyed on the token's public
-    # id, so one agent cannot spend another's allowance, and a bad token on the
-    # source address, so guessing is not free.
-    agent_limiter = SlidingWindowRateLimiter(
-        settings.rate_limit_window_seconds,
-        settings.agent_rate_limit_max_requests,
-    )
+    # Agent tokens get their own, lower limit, and failures their own bucket, in the
+    # agent guard (#164, app/agent_limits.py).
+    app.state.agent_guard = AgentGuard(settings)
     app.state.clock = lambda: datetime.now(UTC)
     announced: dict[str, float] = {}  # when each client's trip was last reported
 
@@ -439,21 +358,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # check behind it is cached -- see Database.ping_cached.
         if _is_api_path(path) and request.method != "OPTIONS" and path != "/api/health":
             if is_agent_path(path):
-                # The identity header is not read here: on this route it means
-                # nothing, so it cannot be the key either (a client would rotate it).
-                presented = parse_bearer(request.headers.get("authorization"))
-                source = source_of(request)
+                # Limited inside the route's dependency, AFTER the token is checked
+                # (app/agent_limits.py): a limit that ran first would let anyone who
+                # can reach this path lock out every agent behind the same address.
                 tripped = None
-                if not await rate_limiter.allow(f"agent-src:{source}"):
-                    tripped = (f"agent-src:{source}", settings.rate_limit_max_requests)
-                else:
-                    key = (
-                        f"agent:{presented.token_id}"
-                        if presented.token_id
-                        else f"agent-bad:{source}"
-                    )
-                    if not await agent_limiter.allow(key):
-                        tripped = (key, settings.agent_rate_limit_max_requests)
             else:
                 key = _rate_limit_key(request, settings)
                 tripped = (

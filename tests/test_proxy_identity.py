@@ -568,6 +568,27 @@ def check_agent_route(workdir: Path) -> None:
         status == 200 and got.get("x-auth-request-email") == "cmo@hospital.org",
         f"HTTP {status}",
     )
+    # A token put in a URL is refused by the API; the proxy's log must not keep it
+    # either, and must not change what it keeps of any other route.
+    for path in (
+        "/api/agent/me?token=LEAKME111",
+        "/api/Agent/ME?access_token=LEAKME222&x=1",
+        "/api/agent/projects/pr_x?api_key=LEAKME333",
+    ):
+        request(path, BEARER)
+    request("/api/me?visible=KEEPME444", signed_in)
+    time.sleep(1)
+    logs = docker("logs", CADDY)
+    text = logs.stdout + logs.stderr
+    check(
+        "the proxy's log keeps no query string of an agent route", "LEAKME" not in text
+    )
+    check(
+        "and says it was left out",
+        text.count("?[redacted]") >= 3,
+        f"{text.count('?[redacted]')} mark(s)",
+    )
+    check("every other route's log line is as it was", "visible=KEEPME444" in text)
     # And the shared secret is still sent on the agent route, as on every route.
     start_caddy(workdir, {**oauth2[1], "PROXY_SHARED_SECRET": "agent/route+secret="})
     status, body, _ = request(

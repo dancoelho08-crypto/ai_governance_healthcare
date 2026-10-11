@@ -213,12 +213,12 @@ services:
 
       # The read-only agent API (#164, docs/agent-api.md). OFF while AGENT_ID_SECRET is
       # empty: no token can be minted and /api/agent/ answers 404. Set it to a long
-      # random value (openssl rand -base64 48) to turn the API on; it keys the opaque
-      # ids the API shows in place of people, so keep it like a password.
+      # random value (openssl rand -hex 32) to turn the API on; it keys the opaque
+      # ids the API shows in place of people and projects, so keep it like a password.
       AGENT_ID_SECRET: ${AGENT_ID_SECRET:-}
       AGENT_RATE_LIMIT_MAX_REQUESTS: ${AGENT_RATE_LIMIT_MAX_REQUESTS:-60}
+      AGENT_FAILURE_RATE_LIMIT_MAX_REQUESTS: ${AGENT_FAILURE_RATE_LIMIT_MAX_REQUESTS:-30}
       AGENT_MAX_ACTIVE_TOKENS: ${AGENT_MAX_ACTIVE_TOKENS:-5}
-      AGENT_EXTRA_VALUES: ${AGENT_EXTRA_VALUES:-}
 
       LOG_LEVEL: ${LOG_LEVEL:-info}
       # One JSON object per line, security events named and tagged (#38). `text` is

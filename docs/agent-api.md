@@ -19,8 +19,8 @@ described here exists on a server where it is not set.
 | Read-only. Three `GET` routes under `/api/agent/`, and nothing that writes. | A way to change a record, an access list or a sign-off. No write route exists, and the proxy refuses any other method on the path. |
 | The stored values: each answered item's status and due date, each checkpoint's decision and its date, who set it, who may open the project. | A verdict. No phase, no flag, no score, no color, no "on track" or "out of compliance". Those are the dashboard's computations, and the dashboard is where they are shown. |
 | The same projects the token's owner's own dashboard shows. | A wider view. Nothing archived, nothing the owner cannot open, and never emergency access, whoever minted the token. |
-| People as **opaque ids** (`u_` and 32 hex characters). | A directory. No name and no email appears in any response. |
-| Structured values only. | A source of text. No note, no rationale, no evidence or reference title, no committee name, and no free-text owner: the text people type never reaches an agent. |
+| People and projects as **opaque ids** (`u_` and `pr_`, then 32 hex characters). | A directory, or a list of names. No name and no email appears in any response, and a project is a reference, not its name. |
+| Structured values only: ids and words of the framework definitions, dates, and the opaque ids. | A source of text. No note, no rationale, no evidence or reference title, no committee name, no free-text owner and no project name. A record's own keys (a project id, an item or checkpoint key) are chosen by whoever wrote it, so none is returned unless it is a word of the framework definitions; the project itself is returned as a reference. |
 | One comparison with the calendar: `overdue` is true when a stored due date is before today (UTC). | A schedule. It does not know whether an item is settled. |
 
 An answer is a record of what someone registered, with who and when where the
@@ -35,20 +35,37 @@ compliant, and an agent that reports it as one is wrong.
   person's signed-in session and nothing else).
 - **A token reaches one route family.** It is accepted under `/api/agent/` and
   on no other route. On every other route it is not read at all.
-- **The identity header means nothing on the agent routes.** The front door's
-  header is ignored there, and the proxy strips it, so a client cannot choose
-  who it is by sending one.
+- **The identity header means nothing on the agent routes.** The API does not
+  read any identity header there, whatever its name, so a client cannot choose
+  who it is by sending one. As defense in depth the proxy also deletes the
+  sixteen header names it knows (the canonical `X-Auth-Request-*` set and what
+  Google IAP, the AWS ALB, Azure Easy Auth and oauth2-proxy set). That list is
+  fixed: a header with another name, or a custom `IDENTITY_HEADER`, reaches the
+  API and is ignored there.
 - **A stolen token is bounded, not harmless.** It stops working at the eighth
   hour on its own. Its owner can revoke it now, and an operator can revoke it
   without them. Every call it makes is in the read trail, marked as agent access,
-  with the token's id; the calls the rate limit turns away are in the security
-  log instead.
+  with the token's id, and a call a rate limit turns away is counted in the
+  security log instead ([what a call leaves behind](#what-a-call-leaves-behind)).
 - **A wrong token learns nothing.** Missing, malformed, unknown, expired, revoked
   and removed are the same answer: the same status, the same body, the same
   header. Which it was is in the read trail, for the operator, and nowhere else.
+- **A flood of wrong tokens costs nothing that lasts.** The token is checked
+  before anything is limited. A bad token writes no row unless it names a token
+  that exists, and then only a handful per source per minute; the rest are
+  counted in one security-log line, and a source that has failed too often is
+  answered `429` without any write. A working token is never refused because of
+  the address it came from, and nobody can use up another token's allowance by
+  naming it.
 - **The server cannot leak what it never copies.** Each response is built field by
   field from an allowlist of stored keys. A new field in the stored record
-  reaches no agent until someone adds it, in a reviewed change.
+  reaches no agent until someone adds it, in a reviewed change. A key a writer
+  chose (an item id, a checkpoint id, a supplement id) is returned only if it is a
+  word of the framework definitions the server was built with; a project is
+  returned as an opaque reference. So an agent can say "project `pr_...` has
+  criterion `s1-3` marked `notmet`", and cannot say what the project is called.
+  Names, if they ever arrive, will be an explicit opt-in that labels them as
+  untrusted text, and are not in this version.
 - **What you send to a model is your decision.** Whatever reads these answers
   may be a model running somewhere. The answers hold governance metadata and
   opaque ids, never patient data (patient data is out of scope everywhere in this
@@ -67,7 +84,11 @@ only. The response holds the token once.
 **Shape.** `agt_`, 16 hex characters (the token's public id), a `.`, and 43
 characters of URL-safe base64 (256 random bits). Only the public id is ever
 logged, and only a SHA-256 hash of the whole token is stored, so the server
-cannot show a token again.
+cannot show a token again. The token is read from the `Authorization` header and
+nowhere else; one sent in a URL, a cookie or another header is refused. Do not
+send it in a URL anyway: this server and the proxy in this repository keep the
+query string of an agent route out of their logs, but your front door, load
+balancer or a client's own log may not.
 
 **Lifetime.** Exactly 8 hours from the moment it is minted, and the database
 refuses any other lifetime. It cannot be extended: mint another.
@@ -216,8 +237,9 @@ The projects the token's owner's own dashboard lists, with archived ones taken
 out. That is the same list, from the same code, as `GET /api/projects` gives
 that person: a project they own, write or read, and a project with no owner yet
 (which every signed-in person can open, as the dashboard shows it). A project
-whose record follows another framework than the server's is returned with its
-`framework` id, and can be filtered by it. An agent never has emergency access,
+whose record follows another framework than the server's build knows is returned
+with a null `framework` and no items or checkpoints; one of a framework of the
+build carries its `framework` id, and can be filtered by it. An agent never has emergency access,
 whoever minted its token, and a project the owner loses access to leaves what
 the token sees on the next call.
 
@@ -233,13 +255,21 @@ at the viewer's local date), so do not expect the two to agree.
 
 ### Values you can be given
 
-A status or a decision is one of the words in the framework definitions the server
-knows: the statuses `met`, `partial`, `notmet`, `na`, `declined`, `done`, `started`,
-`todo`, `skip` and the checkpoint decisions of the published and example
-frameworks. Anything else that is stored, free text included, is returned as
-`null`. An operator who builds their own framework adds its words with
-`AGENT_EXTRA_VALUES`. Item ids and checkpoint ids are returned only when they look
-like an id (letters, digits, `-` and `_`).
+A project is a **reference**, `pr_` and 32 hex characters (HMAC-SHA256 under
+`AGENT_ID_SECRET`, stable in a deployment). Its own id is chosen by whoever created
+it and can be anything, a patient's name included, so it is never returned and cannot
+be used to ask for it: `GET /api/agent/projects/{ref}` finds the reference among
+the projects the token's owner's dashboard shows, and an unknown, an invisible and an
+archived project all answer the same `404`.
+
+An item id, a checkpoint id, a supplement's id, a status and a decision are returned
+only if they are words of the framework definitions the server's build carries: the
+build writes them into `manifest.json`, the migrate job loads them into the database,
+and the API checks each against the framework the record follows (a supplement's
+answers against the supplement's own). Anything else a record holds under those
+keys is returned as `null` or left out, free text included: no pattern can tell a name
+from an id, a list of the ids can. With no manifest loaded, an agent is shown no item,
+checkpoint or status at all. People are `u_` and 32 hex characters.
 
 ### `GET /api/agent/me`
 
@@ -306,7 +336,7 @@ the order the dashboard uses.
 | `offset` | integer | The offset used. |
 | `next_offset` | integer or null | The offset of the next page, or null on the last. |
 | `projects` | array | The projects on this page, each as below. |
-| `projects[].id` | string | The project id. |
+| `projects[].ref` | string | An opaque reference to the project (`pr_` and 32 hex characters). Its own id is never returned. |
 | `projects[].framework` | string or null | The framework the record follows: its stamp, or `chai` when it has none. Null if the stored value is not an id. |
 | `projects[].updated_at` | string | When the record last changed (UTC). |
 | `projects[].updated_by` | string or null | Who changed it last, as an opaque id. |
@@ -359,7 +389,7 @@ Example response:
   "next_offset": null,
   "projects": [
     {
-      "id": "p1k2m3n4o5",
+      "ref": "pr_0b7a41c96d2e4f58a3c1e9d70b64f2a8",
       "framework": "chai",
       "updated_at": "2026-10-09T15:12:44.031Z",
       "updated_by": "u_4f1c0a7b2e9d4c3a8b6f5e1d0c9b8a7f",
@@ -401,15 +431,15 @@ curl -sS "$BASE/api/agent/portfolio?overdue_since=2026-09-01&overdue_before=2026
 curl -sS "$BASE/api/agent/portfolio?owner=$OWNER_ID" -H "Authorization: Bearer $TOKEN"
 ```
 
-### `GET /api/agent/projects/{project_id}`
+### `GET /api/agent/projects/{ref}`
 
-One project, with the same fields as an element of `projects` above.
+One project, by the reference the portfolio gave, with the same fields as an element of `projects` above.
 
 **Response fields**
 
 | Field | Type | Meaning |
 |---|---|---|
-| `id` | string | The project id. |
+| `ref` | string | An opaque reference to the project. Its own id is never returned. |
 | `framework` | string or null | The framework the record follows. |
 | `updated_at` | string | When the record last changed (UTC). |
 | `updated_by` | string or null | Who changed it last, as an opaque id. |
@@ -448,11 +478,11 @@ One project, with the same fields as an element of `projects` above.
 | `401` | No token, or one that is wrong, expired or revoked. |
 | `403` | The request did not come through the authenticating proxy. |
 | `404` | No such project, or not one this token's owner's dashboard shows. The answer is the same for a project that does not exist, one that is archived and one the owner may not open. |
-| `422` | The project id is not valid. |
+| `422` | The reference is not `pr_` and 32 hex characters. |
 | `429` | Too many requests for this token. |
 
 ```bash
-curl -sS "$BASE/api/agent/projects/$PROJECT_ID" -H "Authorization: Bearer $TOKEN"
+curl -sS "$BASE/api/agent/projects/$PROJECT_REF" -H "Authorization: Bearer $TOKEN"
 ```
 
 ### Errors
@@ -469,28 +499,51 @@ a bad parameter is a list naming the parameter, in FastAPI's usual shape.
 
 ### The rate limit
 
-Each token may make 60 calls per 60 seconds (`AGENT_RATE_LIMIT_MAX_REQUESTS`), lower
-than the limit a person at the dashboard has (240). The limit is per token, so one
-agent cannot spend another's; calls with a token that cannot be read are counted
-against the address they came from. A refused call (a `429`) is in the security
-log, once per client per window, and not in the read trail. The limiter lives in
-each replica, so behind several the ceiling is that many times the setting.
+The token is checked first, and only then is anything limited.
+
+- **A working token** may make 60 calls per 60 seconds
+  (`AGENT_RATE_LIMIT_MAX_REQUESTS`), lower than the limit a person at the dashboard
+  has (240). Only a call whose token verified spends it, so one agent cannot spend
+  another's, and nobody can spend a token's allowance by naming its public id.
+- **A failed call** (a token that is missing, wrong, expired or revoked) is counted
+  against its source, up to 30 per window (`AGENT_FAILURE_RATE_LIMIT_MAX_REQUESTS`).
+  After that the rest are answered `429` with nothing written. A token that works is
+  never counted against its source and never refused for it: a flood from an address
+  does not lock out an agent behind the same address.
+- **The source** is the socket peer. The address the proxy reports in `X-Real-IP` is
+  believed only when `TRUSTED_PROXY_CIDR` is set and the peer is inside it, that is,
+  when the peer is the proxy; the compose stack sets it. With no range set, every
+  caller behind the proxy is one source, which limits them together and cannot be
+  rotated by a client.
+
+A `429` carries `Retry-After` (seconds) and no other rate-limit header. A working
+token that is over its own allowance is logged once per window as `ratelimit.tripped`
+(`key` `agent:` and its public id); failures are summarized, below. The limiters live
+in each replica, so behind several the ceilings are that many times the settings.
 
 ## What a call leaves behind
 
-Every call, answered or refused, writes one row to the read trail (`access_event`)
-and the same fact to the security log. An answered call's row is written in the
-same transaction as the answer, so an answer that cannot be recorded is not given.
+Not every call is a row, because the read trail is append-only and an unauthenticated
+caller must not be able to grow it:
+
+| The call | The trail | The security log |
+|---|---|---|
+| Answered (`200`) | One row, in the same transaction as the answer, so an answer that cannot be recorded is not given. | `record.read`, with `via` set to `agent` |
+| A project the owner's dashboard does not show (`404`) | One row (`agent_refused`, reason `not_visible`) | `agent.refused` |
+| A token that exists but is expired, revoked, or presented with the wrong secret (`401`) | One row (`agent_refused`), at most 5 per token id and source per window | `agent.refused`, for each row |
+| A token that is malformed, or names no token (`401`) | **No row** | Counted: one `agent.failures` line per source per window, with the count |
+| Over the failure limit or a token's own limit (`429`) | **No row** | Counted in the same `agent.failures` line, or `ratelimit.tripped` once per window |
+
 The row is marked as agent access and carries the token's public id, never its secret:
 
 | Column | An agent call |
 |---|---|
 | `via` | `agent` (a session read is `session`). |
-| `actor` | The token's owner's identity id. For a call whose token was not valid and so named nobody, `unknown`. |
+| `actor` | The token's owner's identity id. For a refusal whose secret did not match, `unknown`. |
 | `token_id` | The token's public id, or the one the caller presented. |
 | `action` | `agent_me`, `agent_portfolio`, `agent_project`, or `agent_refused`. |
-| `project_id` | For one project, and for a refused project. |
-| `detail` | The route; for a portfolio the ids returned, the count, the total and the filters; for a refusal the reason (`malformed`, `unknown`, `revoked`, `expired`, or `not_visible` for a project the owner's dashboard does not show), which the caller is never told. |
+| `project_id` | For one project that was returned, its real id (the trail is the operator's); null for a refusal. |
+| `detail` | The route; for a portfolio the ids returned, the count, the total and the filters; for a refusal the reason (`unknown` for a wrong secret, `revoked`, `expired`, or `not_visible`, with the `ref` asked for), which the caller is never told. |
 
 What did an agent read? For one person's tokens in a period:
 
@@ -516,30 +569,36 @@ A refusal whose `detail` has `"identity_header_ignored": true` carried an identi
 header, which the agent routes ignore: a proxy that works strips it, so seeing one
 means the request did not come through the agent route of the proxy.
 
-The security events are `agent_token.minted`, `agent_token.revoked`, `agent.refused`
-and, for a successful call, `record.read` with `via` set to `agent`
+The security events are `agent_token.minted`, `agent_token.revoked`, `agent.refused`,
+`agent.failures` (the count of failed calls from one source in one window, written
+when the window closes, at the next failed call, or at shutdown) and, for a successful
+call, `record.read` with `via` set to `agent`
 ([the list](deploy.md#security-events-collecting-retaining-and-alerting)).
 
 ## For the operator
 
 ### Turn it on
 
-1. Set `AGENT_ID_SECRET` to a long random value: `openssl rand -base64 48`. It
-   keys the opaque ids and is not stored in the database; keep it like a
+1. Set `AGENT_ID_SECRET` to a long random value: `openssl rand -hex 32`. The
+   server refuses to start on one shorter than 32 characters, with fewer than
+   10 different ones, or made of one short pattern repeated. It keys the opaque ids and is not stored in the database; keep it like a
    password. Changing it changes every id an agent is shown, and loses nothing.
 2. Apply the migration. `013_agent_tokens.sql` runs with the others
    (`python -m app.migrate`, compose's `migrate` service, or `RUN_MIGRATIONS=true`).
-   It creates `agent_token` and marks the read trail. Nothing is stored in a
-   table until a person mints a token.
+   It creates `agent_token` and marks the read trail, and `014_agent_vocabulary.sql`
+   creates `agent_vocabulary`, which the migrate job fills from the build's
+   `manifest.json` (`RETIREMENT_MANIFEST`) on every run, replacing its rows. No
+   manifest, no words: an agent is then shown no item or checkpoint. Nothing else is
+   stored until a person mints a token.
 3. Let the agent path through your front door ([below](#let-the-path-through-your-front-door)).
 4. Restart the API.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `AGENT_ID_SECRET` | empty (the API is off) | At least 32 characters. Keys the opaque ids. |
+| `AGENT_ID_SECRET` | empty (the API is off) | At least 32 characters, at least 10 different, not a repeated pattern. Keys the opaque ids of people and projects. |
 | `AGENT_RATE_LIMIT_MAX_REQUESTS` | `60` | Calls per token per `RATE_LIMIT_WINDOW_SECONDS`. |
+| `AGENT_FAILURE_RATE_LIMIT_MAX_REQUESTS` | `30` | Failed calls one source may make per window before the rest are answered `429`. |
 | `AGENT_MAX_ACTIVE_TOKENS` | `5` | Live tokens one person may hold. |
-| `AGENT_EXTRA_VALUES` | empty | Comma-separated status and decision words of your own framework build. |
 
 ### Let the path through your front door
 
@@ -549,9 +608,11 @@ three `GET` routes under `/api/agent/` need this: the token routes
 (`/api/agent-tokens`) are a person's, and stay behind sign-on.
 
 The proxy in this repository does its half: `proxy/Caddyfile` forwards exactly
-the three agent `GET` routes, strips every identity header a client sends on
-them and sets none, answers anything else under the prefix with `404`, and
-leaves every other route as it was. What it cannot do is open a front door that
+the three agent `GET` routes, deletes sixteen known identity header names on
+them as defense in depth and sets none (the API reads no identity header on these
+routes in any case), answers anything else under the prefix with `404`, keeps the
+query string of these routes out of its log, and leaves every other route as it
+was. What it cannot do is open a front door that
 sits in front of it. The rest depends on what that is:
 
 | Front door | What to do | Can it? |
@@ -595,11 +656,13 @@ that holds only expired ones).
 
 ### What to monitor
 
-- `agent.refused` events in bursts from one `source_ip`: a guesser. The row in
-  the read trail says `unknown` for a token that matched nothing and names the
-  person for one that matched and had stopped working.
-- `ratelimit.tripped` with a `key` that begins `agent`: an agent in a loop, or
-  a guesser.
+- `agent.failures` lines with a large `count`, or `limited` true: a guesser, or an
+  agent with a dead token in a loop. The line names the `source`. A burst of
+  `agent.refused` events (each one a read-trail row) for one token id is somebody
+  who knows that id; the row says `unknown` for a wrong secret and names the person
+  for a token that matched and had stopped working.
+- `ratelimit.tripped` with a `key` that begins `agent:`: a working token over its own
+  allowance, an agent in a loop.
 - `agent_token.minted` from a person who does not use agents.
 - A person's tokens when they leave: the app does not see your directory.
 

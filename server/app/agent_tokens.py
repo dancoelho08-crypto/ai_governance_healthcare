@@ -119,6 +119,22 @@ def opaque_id(secret: str, identity_id: str) -> str:
     return "u_" + digest[:32]
 
 
+def project_ref(secret: str, project_id: str) -> str:
+    """The id an agent is shown for a project: ``pr_`` and 128 bits of HMAC-SHA256.
+
+    A project's id is chosen by whoever creates it, so it can hold anything, a name
+    included. A ref is stable within a deployment, tells nothing about the project and
+    cannot be computed without the secret. The HMAC input carries its own domain
+    prefix, so a ref and a person's id are never the same function of the same text.
+    """
+    digest = hmac.new(
+        secret.encode("utf-8"),
+        b"chai-agent-project-v1:" + project_id.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return "pr_" + digest[:32]
+
+
 def label_problem(label: str) -> str | None:
     if label and not _LABEL_SHAPE.fullmatch(label):
         return (
@@ -140,6 +156,9 @@ class Verified:
     # The person the token belongs to, when the secret matched but it was expired or
     # revoked: whoever holds the secret is that person's agent, so the trail can say so.
     user_id: str | None = None
+    # The presented id is a token that exists, whatever its secret was. Only then is a
+    # refusal about a token somebody holds, and only then may it be a trail row.
+    known_id: bool = False
 
 
 async def authenticate(
@@ -156,11 +175,11 @@ async def authenticate(
     stored = row["secret_hash"] if row else _NO_HASH
     matches = hmac.compare_digest(stored, hash_token(presented.token))
     if row is None or not matches:
-        return Verified(None, Refusal.UNKNOWN)
+        return Verified(None, Refusal.UNKNOWN, known_id=row is not None)
     if row["revoked_at"] is not None:
-        return Verified(None, Refusal.REVOKED, row["principal_id"])
+        return Verified(None, Refusal.REVOKED, row["principal_id"], True)
     if row["expires_at"] <= now:
-        return Verified(None, Refusal.EXPIRED, row["principal_id"])
+        return Verified(None, Refusal.EXPIRED, row["principal_id"], True)
     return Verified(
         AgentCaller(row["token_id"], row["principal_id"], row["expires_at"]), None
     )

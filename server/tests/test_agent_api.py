@@ -21,6 +21,7 @@ import contextlib
 import hashlib
 import io
 import json
+import logging
 import re
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
@@ -29,8 +30,6 @@ import pytest
 from app.agent import (
     AgentPortfolioOut,
     AgentProject,
-    GateDecision,
-    ItemStatus,
     is_agent_path,
 )
 from app.agent_tokens import (
@@ -38,6 +37,7 @@ from app.agent_tokens import (
     hash_token,
     opaque_id,
     parse_bearer,
+    project_ref,
 )
 from app.main import configure_logging, create_app
 from httpx import ASGITransport, AsyncClient
@@ -59,6 +59,12 @@ BOB = "bob@hospital.example"
 EMERGENCY = "breakglass@hospital.example"
 NOW = datetime(2026, 10, 10, 12, 0, 0, tzinfo=UTC)
 
+
+def R(project_id: str) -> str:
+    """The reference an agent is given for a project id."""
+    return project_ref(SECRET, project_id)
+
+
 TOKEN_SHAPE = re.compile(r"^agt_[0-9a-f]{16}\.[A-Za-z0-9_-]{43}$")
 OPAQUE_SHAPE = re.compile(r"^u_[0-9a-f]{32}$")
 
@@ -70,6 +76,7 @@ def settings():
         emergency_access_ids=frozenset({EMERGENCY}),
         rate_limit_max_requests=100_000,
         agent_rate_limit_max_requests=100_000,
+        agent_failure_rate_limit_max_requests=100_000,
     )
 
 
@@ -81,6 +88,7 @@ async def running(**overrides: object) -> AsyncIterator[AsyncClient]:
         "emergency_access_ids": frozenset({EMERGENCY}),
         "rate_limit_max_requests": 100_000,
         "agent_rate_limit_max_requests": 100_000,
+        "agent_failure_rate_limit_max_requests": 100_000,
     }
     app = create_app(make_settings(**{**base, **overrides}))
     async with app.router.lifespan_context(app):
@@ -165,6 +173,32 @@ def access(owners=(), writers=(), readers=()) -> dict:
 async def rows_of(sql: str, *args: object) -> list[dict]:
     async with owner_connection() as conn:
         return [dict(r) for r in await conn.fetch(sql, *args)]
+
+
+async def add_framework(
+    fid: str,
+    *,
+    role: str = "primary",
+    items=(),
+    gates=(),
+    statuses=(),
+    decisions=(),
+) -> None:
+    """Add a framework's words to agent_vocabulary, as a build's manifest would."""
+    rows = [(fid, "framework", role)]
+    for kind, words in (
+        ("items", items),
+        ("gates", gates),
+        ("statuses", statuses),
+        ("decisions", decisions),
+    ):
+        rows += [(fid, kind, w) for w in words]
+    async with owner_connection() as conn:
+        await conn.executemany(
+            "INSERT INTO agent_vocabulary (framework_id, kind, value) "
+            "VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+            rows,
+        )
 
 
 async def trail() -> list[dict]:
@@ -361,14 +395,29 @@ async def test_a_short_secret_stops_the_server_starting(monkeypatch) -> None:
     assert Settings.from_env().agent_api_enabled
 
 
-async def test_a_value_that_is_not_a_vocabulary_word_stops_the_server(
-    monkeypatch,
-) -> None:
+@pytest.mark.parametrize(
+    "weak",
+    [
+        "a" * 32,  # one character, repeated
+        "ab" * 20,  # a pattern repeated
+        "0123456789abcdef" * 3,  # a period of 16
+        "abcdefghi" * 6,  # under ten different characters, and a pattern
+        "aabacabadabacabaeabacabadabacabafabacabadabacaba",  # six different, no period
+        "passwordpassword",  # short
+    ],
+)
+def test_a_weak_secret_stops_the_server_starting(monkeypatch, weak: str) -> None:
+    import secrets as py_secrets
+
     from app.config import Settings
 
-    monkeypatch.setenv("AGENT_EXTRA_VALUES", "Fine word,alice@example.org")
-    with pytest.raises(RuntimeError, match="AGENT_EXTRA_VALUES"):
+    monkeypatch.setenv("AGENT_ID_SECRET", weak)
+    with pytest.raises(RuntimeError, match="AGENT_ID_SECRET"):
         Settings.from_env()
+    # What the docs tell an operator to generate passes, every time.
+    for _ in range(200):
+        monkeypatch.setenv("AGENT_ID_SECRET", py_secrets.token_hex(32))
+        assert Settings.from_env().agent_api_enabled
 
 
 async def test_minting_needs_a_person_not_an_anonymous_request() -> None:
@@ -452,7 +501,7 @@ async def test_every_bad_token_gets_the_same_401(client) -> None:
             for path in (
                 "/api/agent/me",
                 "/api/agent/portfolio",
-                "/api/agent/projects/x",
+                f"/api/agent/projects/{R('x')}",
             ):
                 r = await http.get(path)
                 seen[f"{name} {path}"] = (
@@ -462,7 +511,11 @@ async def test_every_bad_token_gets_the_same_401(client) -> None:
                 )
     set_clock(client, NOW + timedelta(hours=8, seconds=1))
     async with as_agent(client, expired["token"]) as http:
-        for path in ("/api/agent/me", "/api/agent/portfolio", "/api/agent/projects/x"):
+        for path in (
+            "/api/agent/me",
+            "/api/agent/portfolio",
+            f"/api/agent/projects/{R('x')}",
+        ):
             r = await http.get(path)
             seen[f"expired {path}"] = (
                 r.status_code,
@@ -592,7 +645,7 @@ async def test_the_agent_routes_are_read_only(client) -> None:
     assert set(paths) == {
         "/api/agent/me",
         "/api/agent/portfolio",
-        "/api/agent/projects/{project_id}",
+        "/api/agent/projects/{ref}",
     }
     assert all(set(methods) == {"get"} for methods in paths.values())
     minted = await mint(client)
@@ -601,7 +654,7 @@ async def test_the_agent_routes_are_read_only(client) -> None:
             for path in (
                 "/api/agent/me",
                 "/api/agent/portfolio",
-                "/api/agent/projects/p",
+                f"/api/agent/projects/{R('p')}",
             ):
                 r = await agent.request(method, path, json={})
                 assert r.status_code == 405, (method, path)
@@ -618,9 +671,13 @@ async def _ids(client: AsyncClient, token: str) -> list[str]:
             r = await agent.get(f"/api/agent/portfolio?limit=2&offset={offset}")
             assert r.status_code == 200, r.text
             body = r.json()
-            ids += [p["id"] for p in body["projects"]]
+            ids += [p["ref"] for p in body["projects"]]
             if body["next_offset"] is None:
-                return ids
+                known = {
+                    R(r["id"]): r["id"]
+                    for r in await rows_of("SELECT id FROM projects")
+                }
+                return [known.get(ref, ref) for ref in ids]
             offset = body["next_offset"]
 
 
@@ -668,11 +725,11 @@ async def test_an_archived_project_is_never_returned_by_any_route(client) -> Non
     token = (await mint(client, ALICE))["token"]
     assert "mine-archived" not in await _ids(client, token)
     async with as_agent(client, token) as agent:
-        archived = await agent.get("/api/agent/projects/mine-archived")
-        other = await agent.get("/api/agent/projects/bobs")
-        missing = await agent.get("/api/agent/projects/nonexistent")
-        visible = await agent.get("/api/agent/projects/mine")
-    assert visible.status_code == 200 and visible.json()["id"] == "mine"
+        archived = await agent.get(f"/api/agent/projects/{R('mine-archived')}")
+        other = await agent.get(f"/api/agent/projects/{R('bobs')}")
+        missing = await agent.get(f"/api/agent/projects/{R('nonexistent')}")
+        visible = await agent.get(f"/api/agent/projects/{R('mine')}")
+    assert visible.status_code == 200 and visible.json()["ref"] == R("mine")
     assert archived.status_code == other.status_code == missing.status_code == 404
     assert archived.text == other.text == missing.text
 
@@ -700,7 +757,7 @@ async def test_an_emergency_user_gets_no_emergency_access_through_a_token(
     agent_ids = set(await _ids(client, token))
     assert agent_ids == {"open"}  # only what an ordinary stranger sees
     async with as_agent(client, token) as agent:
-        assert (await agent.get("/api/agent/projects/bobs")).status_code == 404
+        assert (await agent.get(f"/api/agent/projects/{R('bobs')}")).status_code == 404
     # And the read trail has no break-glass entry for it.
     assert not [e for e in await trail() if "breakglass" in json.dumps(e["detail"])]
 
@@ -750,8 +807,8 @@ async def test_pagination_pages_without_gaps_or_repeats_and_is_capped(client) ->
             ).status_code == 422, bad
     assert first["total"] == 7 and first["next_offset"] == 3
     assert second["next_offset"] == 6 and third["next_offset"] is None
-    paged = [p["id"] for b in (first, second, third) for p in b["projects"]]
-    assert paged == [p["id"] for p in everything["projects"]]
+    paged = [p["ref"] for b in (first, second, third) for p in b["projects"]]
+    assert paged == [p["ref"] for p in everything["projects"]]
     assert len(set(paged)) == 7
     assert everything["limit"] == 50 and everything["offset"] == 0
 
@@ -759,16 +816,19 @@ async def test_pagination_pages_without_gaps_or_repeats_and_is_capped(client) ->
 async def test_a_project_with_a_great_many_items_is_truncated_and_says_so(
     client,
 ) -> None:
-    items = {f"s1-{i}": {"status": "met"} for i in range(520)}
+    ids = [f"s9-{i}" for i in range(520)]
+    await add_framework("chai", items=ids)  # words the build's definition would add
+    items = {i: {"status": "met"} for i in ids}
     await put_project("big", await _stored_doc(items=items))
     token = (await mint(client))["token"]
     async with as_agent(client, token) as agent:
-        body = (await agent.get("/api/agent/projects/big")).json()
+        body = (await agent.get(f"/api/agent/projects/{R('big')}")).json()
     assert len(body["items"]) == 500 and body["items_truncated"] is True
 
 
 async def test_the_filters(client) -> None:
     other = "other-framework"
+    await add_framework(other, items=["s1-1"], statuses=["met"])
     await put_project(
         "a",
         await _stored_doc(
@@ -800,7 +860,8 @@ async def test_the_filters(client) -> None:
         async with as_agent(client, token) as agent:
             r = await agent.get(f"/api/agent/portfolio?{query}")
         assert r.status_code == 200, r.text
-        return sorted(p["id"] for p in r.json()["projects"])
+        known = {R(r["id"]): r["id"] for r in await rows_of("SELECT id FROM projects")}
+        return sorted(known[p["ref"]] for p in r.json()["projects"])
 
     assert await ids("status=met") == ["a", "c"]
     assert await ids("status=partial") == ["b"]
@@ -850,13 +911,13 @@ async def test_overdue_is_a_date_comparison_and_nothing_else(client) -> None:
                 "s1-5": {"status": "notmet", "due": "2026-02-30"},  # not a date
                 "s1-6": {"status": "notmet", "due": "10/09/2026"},  # not ISO
                 "s1-7": {"status": "notmet", "due": ""},
-                "s1-8": {"status": "notmet"},
+                "s2-1": {"status": "notmet"},
             }
         ),
     )
     token = (await mint(client))["token"]
     async with as_agent(client, token) as agent:
-        body = (await agent.get("/api/agent/projects/p")).json()
+        body = (await agent.get(f"/api/agent/projects/{R('p')}")).json()
     got = {i["id"]: (i["due"], i["overdue"]) for i in body["items"]}
     assert got["s1-1"] == ("2026-10-09", True)
     assert got["s1-2"] == ("2026-10-10", False)
@@ -864,7 +925,7 @@ async def test_overdue_is_a_date_comparison_and_nothing_else(client) -> None:
     assert got["s1-4"] == ("2026-01-01", True)  # the status is not consulted
     assert got["s1-5"] == (None, False)
     assert got["s1-6"] == (None, False)
-    assert got["s1-7"] == (None, False) and got["s1-8"] == (None, False)
+    assert got["s1-7"] == (None, False) and got["s2-1"] == (None, False)
     assert body["has_overdue"] is True
 
 
@@ -877,11 +938,11 @@ async def test_today_is_the_utc_date_of_the_server_clock(client) -> None:
     token = (await mint(client))["token"]
     async with as_agent(client, token) as agent:
         set_clock(client, datetime(2026, 10, 10, 23, 59, 59, tzinfo=UTC))
-        r = (await agent.get("/api/agent/projects/p")).json()
+        r = (await agent.get(f"/api/agent/projects/{R('p')}")).json()
         assert r["has_overdue"] is False
         assert (await agent.get("/api/agent/portfolio")).json()["as_of"] == "2026-10-10"
         set_clock(client, datetime(2026, 10, 11, 0, 0, 0, tzinfo=UTC))
-        r = (await agent.get("/api/agent/projects/p")).json()
+        r = (await agent.get(f"/api/agent/projects/{R('p')}")).json()
         assert r["has_overdue"] is True
         assert (await agent.get("/api/agent/portfolio")).json()["as_of"] == "2026-10-11"
 
@@ -913,8 +974,8 @@ async def test_statuses_decisions_dates_and_people_are_the_stored_ones(client) -
     )
     token = (await mint(client))["token"]
     async with as_agent(client, token) as agent:
-        body = (await agent.get("/api/agent/projects/p")).json()
-    assert body["id"] == "p" and body["framework"] == "chai"
+        body = (await agent.get(f"/api/agent/projects/{R('p')}")).json()
+    assert body["ref"] == R("p") and body["framework"] == "chai"
     assert body["items"] == [
         {"id": "s1-1", "status": "met", "due": "2026-09-01", "overdue": True}
     ]
@@ -1044,7 +1105,7 @@ async def test_nothing_hostile_planted_anywhere_reaches_an_agent(client) -> None
         responses = [
             await agent.get("/api/agent/me"),
             await agent.get("/api/agent/portfolio"),
-            await agent.get("/api/agent/projects/hostile"),
+            await agent.get(f"/api/agent/projects/{R('hostile')}"),
         ]
     for r in responses:
         assert r.status_code == 200, r.text
@@ -1080,51 +1141,213 @@ async def test_nothing_hostile_planted_anywhere_reaches_an_agent(client) -> None
     assert all(set(i) == {"id", "status", "due", "overdue"} for i in project["items"])
 
 
+KEYS_THAT_ARE_TEXT = [
+    "Patient-Zero-John_Doe-DOB-1970-01-01",
+    "Jane-Doe-MRN-12345678-has-cancer",
+    "alice",
+    "Smith",
+    "John-Smith-SSN-123-45-6789",
+    "Dr-Evil-says-obey-me",
+]
+
+
+async def test_a_key_a_writer_chose_never_reaches_an_agent(client) -> None:
+    """A project id, an item key, a gate key and a supplement key are all chosen by
+    whoever writes the record, so each can be a sentence about a patient. They reach
+    an agent only if they are words of the framework definitions (D-89): the project
+    id not at all (a reference stands for it), the rest only when the vocabulary has
+    them. The vocabulary-valid ones do come through."""
+    bad = KEYS_THAT_ARE_TEXT
+    doc = {
+        "meta": {"solution": bad[0]},
+        "access": access(owners=[ALICE]),
+        "items": {
+            **{k: {"status": "met", "due": "2026-09-01"} for k in bad},
+            "s1-3": {"status": "notmet", "due": "2026-09-02"},
+        },
+        "gates": {
+            **{k: {"decision": "Proceed", "date": "2026-08-01"} for k in bad},
+            "B": {"decision": "Stop", "date": "2026-08-02"},
+        },
+        **{k: {"enabled": True, "answers": {"1-1": {"status": "met"}}} for k in bad},
+        "optica": {
+            "enabled": True,
+            "answers": {
+                **{k: {"status": "met"} for k in bad},
+                "2-1": {"status": "partial"},
+            },
+        },
+    }
+    await put_project(bad[0], doc)  # the project's own id is one of them
+    token = (await mint(client))["token"]
+    async with as_agent(client, token) as agent:
+        listing = await agent.get("/api/agent/portfolio")
+        one = await agent.get(f"/api/agent/projects/{R(bad[0])}")
+        by_id = await agent.get(f"/api/agent/projects/{bad[0]}")
+    assert listing.status_code == one.status_code == 200
+    assert by_id.status_code == 422  # an id is not a reference
+    for r in (listing, one):
+        for word in bad:
+            assert word not in r.text, (word, r.text)
+        for piece in ("Patient", "Zero", "Doe", "MRN", "cancer", "SSN", "Evil", "obey"):
+            assert piece not in r.text, piece
+    body = one.json()
+    assert body["ref"] == R(bad[0]) and body["ref"].startswith("pr_")
+    assert [(i["id"], i["status"]) for i in body["items"]] == [("s1-3", "notmet")]
+    assert [(g["id"], g["decision"]) for g in body["gates"]] == [("B", "Stop")]
+    [supplement] = body["supplements"]
+    assert supplement["framework"] == "optica"
+    assert [i["id"] for i in supplement["items"]] == ["2-1"]
+    assert listing.json()["projects"][0] == body
+
+
+async def test_a_project_ref_is_stable_keyed_and_resolves_only_what_is_visible(
+    client,
+) -> None:
+    from app.agent_tokens import opaque_id
+
+    assert R("p") == R("p") != R("q") and R("p").startswith("pr_")
+    assert len(R("p")) == 3 + 32 and OPAQUE_SHAPE.pattern != R("p")
+    assert R("p")[3:] != opaque_id(SECRET, "p")[2:]  # another domain, another function
+    assert project_ref("x" * 40, "p") != R("p")
+    await put_project("mine", {"access": access(owners=[ALICE])})
+    await put_project("bobs", {"access": access(owners=[BOB])})
+    await put_project("gone", {"access": access(owners=[ALICE])}, archived=True)
+    token = (await mint(client))["token"]
+    async with as_agent(client, token) as agent:
+        mine = await agent.get(f"/api/agent/projects/{R('mine')}")
+        answers = [
+            await agent.get(f"/api/agent/projects/{R(x)}")
+            for x in ("bobs", "gone", "never-existed")
+        ]
+        # A ref made with another deployment's key resolves to nothing here.
+        foreign = await agent.get(
+            f"/api/agent/projects/{project_ref('y' * 40, 'mine')}"
+        )
+        malformed = await agent.get("/api/agent/projects/pr_zz")
+    assert mine.status_code == 200
+    assert {a.status_code for a in answers} == {404} == {foreign.status_code}
+    assert len({a.text for a in answers}) == 1
+    assert malformed.status_code == 422
+
+
 def test_the_response_models_are_closed_allowlists() -> None:
     """A new field on a model is a decision, so every model forbids extras and the
     set of fields is pinned here. Adding one means changing this test, in review."""
     assert set(AgentProject.model_fields) == {
-        "id", "framework", "updated_at", "updated_by", "people", "items",
+        "ref", "framework", "updated_at", "updated_by", "people", "items",
         "items_truncated", "gates", "supplements", "has_overdue",
     }  # fmt: skip
     for model in (AgentProject, AgentPortfolioOut):
         assert model.model_config.get("extra") == "forbid"
 
 
-def test_the_vocabulary_covers_every_framework_definition() -> None:
-    """The statuses and decisions an agent may be told are the definitions', so a
-    framework that adds one is a test failure until the enum catches up (or the
-    deployment lists it in AGENT_EXTRA_VALUES)."""
+async def test_the_vocabulary_is_the_framework_definitions(client) -> None:
+    """What an agent may be shown is what the definitions say, found here by a second
+    walk of the files, equal to what the build wrote into manifest.json and to what
+    the migrate job loaded into agent_vocabulary (D-89)."""
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[2] / "app" / "frameworks"
-    statuses: set[str] = set()
-    decisions: set[str] = set()
-    for path in root.glob("*/framework.json"):
-        definition = json.loads(path.read_text(encoding="utf-8"))
-        statuses |= {s["value"] for s in definition["statuses"]}
-        for gate in definition.get("gates", []):
-            decisions |= {o["value"] for o in gate["options"]}
-    assert statuses == {s.value for s in ItemStatus}
-    assert decisions == {d.value for d in GateDecision}
-
-
-async def test_a_deployments_own_values_pass_and_nothing_else_does() -> None:
-    async with running(
-        agent_extra_values=frozenset({"Waived", "Under review"})
-    ) as client:
-        await put_project(
-            "p",
-            await _stored_doc(
-                items={"s1-1": {"status": "Waived"}, "s1-2": {"status": "Nope"}},
-                gates={"A": {"decision": "Under review"}, "B": {"decision": "Nope"}},
-            ),
+    manifest = json.loads(
+        (root.parent.parent / "docs" / "app" / "manifest.json").read_text("utf-8")
+    )
+    in_manifest = {f["id"]: f["vocab"] for f in manifest["frameworks"]}
+    loaded: dict[str, dict[str, set[str]]] = {}
+    for r in await rows_of("SELECT * FROM agent_vocabulary"):
+        loaded.setdefault(r["framework_id"], {}).setdefault(r["kind"], set()).add(
+            r["value"]
         )
-        token = (await mint(client))["token"]
-        async with as_agent(client, token) as agent:
-            body = (await agent.get("/api/agent/projects/p")).json()
-        assert [i["status"] for i in body["items"]] == ["Waived"]
-        assert [g["decision"] for g in body["gates"]] == ["Under review"]
+    assert set(loaded) == set(in_manifest) == {"chai", "optica"}
+    for path in sorted(root.glob("*/framework.json")):
+        definition = json.loads(path.read_text(encoding="utf-8"))
+        fid = definition["id"]
+        expected = {
+            "items": {i["id"] for sec in definition["sections"] for i in sec["items"]},
+            "gates": {g["id"] for g in definition.get("gates", [])},
+            "statuses": {s["value"] for s in definition["statuses"]},
+            "decisions": {
+                o["value"] for g in definition.get("gates", []) for o in g["options"]
+            },
+        }
+        assert expected["items"] and expected["statuses"], fid
+        if fid in in_manifest:  # the default build; the example has its own manifest
+            for kind, words in expected.items():
+                assert set(in_manifest[fid][kind]) == words, (fid, kind)
+                assert loaded[fid].get(kind, set()) == words, (fid, kind)
+        else:
+            import sys
+
+            sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+            from build_manifest import vocabulary
+
+            got = vocabulary(definition)
+            assert {k: set(v) for k, v in got.items()} == expected, fid
+
+
+async def test_a_builds_own_words_pass_and_the_published_ones_do_not_cross_over(
+    client,
+) -> None:
+    """A record stamped for another framework is read against that framework's
+    words: its own statuses pass, another framework's do not."""
+    await add_framework(
+        "acme",
+        items=["plan-1"],
+        gates=["intake"],
+        statuses=["Waived"],
+        decisions=["Under review"],
+    )
+    await put_project(
+        "p",
+        await _stored_doc(
+            meta={"framework": {"id": "acme"}},
+            items={
+                "plan-1": {"status": "Waived"},
+                "s1-1": {"status": "met", "due": "2026-09-01"},  # CHAI's, not acme's
+            },
+            gates={
+                "intake": {"decision": "Under review"},
+                "A": {"decision": "Proceed"},
+            },
+        ),
+    )
+    await put_project(
+        "q",
+        await _stored_doc(
+            items={"s1-1": {"status": "Waived"}},  # acme's word on a CHAI record
+            gates={"A": {"decision": "Under review"}},
+        ),
+    )
+    token = (await mint(client))["token"]
+    async with as_agent(client, token) as agent:
+        p = (await agent.get(f"/api/agent/projects/{R('p')}")).json()
+        q = (await agent.get(f"/api/agent/projects/{R('q')}")).json()
+    assert p["framework"] == "acme"
+    assert [(i["id"], i["status"]) for i in p["items"]] == [("plan-1", "Waived")]
+    assert [(g["id"], g["decision"]) for g in p["gates"]] == [
+        ("intake", "Under review")
+    ]
+    assert q["items"] == [] and q["gates"] == []
+
+
+async def test_with_no_vocabulary_loaded_an_agent_is_shown_no_framework_words(
+    client,
+) -> None:
+    await put_project(
+        "p",
+        await _stored_doc(
+            items={"s1-1": {"status": "met", "due": "2026-09-01"}},
+            gates={"A": {"decision": "Proceed"}},
+        ),
+    )
+    async with owner_connection() as conn:
+        await conn.execute("DELETE FROM agent_vocabulary")
+    token = (await mint(client))["token"]
+    async with as_agent(client, token) as agent:
+        body = (await agent.get(f"/api/agent/projects/{R('p')}")).json()
+    assert body["framework"] is None
+    assert body["items"] == [] and body["gates"] == [] and body["supplements"] == []
+    assert OPAQUE_SHAPE.fullmatch(body["people"]["owners"][0])
 
 
 async def test_a_document_of_the_wrong_shape_is_served_as_empty_not_as_an_error(
@@ -1149,7 +1372,9 @@ async def test_a_document_of_the_wrong_shape_is_served_as_empty_not_as_an_error(
     async with as_agent(client, token) as agent:
         r = await agent.get("/api/agent/portfolio")
         assert r.status_code == 200 and r.json()["total"] == 3
-        assert (await agent.get("/api/agent/projects/odd3")).json()["framework"] is None
+        assert (await agent.get(f"/api/agent/projects/{R('odd3')}")).json()[
+            "framework"
+        ] is None
 
 
 # --- opaque ids ----------------------------------------------------------------
@@ -1210,8 +1435,8 @@ async def test_every_agent_call_is_in_the_read_trail_marked_as_agent_access(
     async with as_agent(client, minted["token"]) as agent:
         await agent.get("/api/agent/me")
         await agent.get("/api/agent/portfolio?status=met&limit=5")
-        await agent.get("/api/agent/projects/p")
-        await agent.get("/api/agent/projects/nope")
+        await agent.get(f"/api/agent/projects/{R('p')}")
+        await agent.get(f"/api/agent/projects/{R('nope')}")
     events = await trail()
     agent_rows = [e for e in events if e["via"] == "agent"]
     assert [e["action"] for e in agent_rows] == [
@@ -1227,8 +1452,10 @@ async def test_every_agent_call_is_in_the_read_trail_marked_as_agent_access(
     assert portfolio["detail"]["projects"] == []  # status=met matched nothing
     assert portfolio["detail"]["filters"] == {"status": "met"}
     assert portfolio["detail"]["total"] == 0 and portfolio["detail"]["count"] == 0
-    assert project["project_id"] == "p"
-    assert refused["project_id"] == "nope"
+    assert project["project_id"] == "p"  # the operator's trail names the real id
+    assert refused["project_id"] is None  # a ref that resolved to nothing
+    assert refused["detail"]["ref"] == R("nope")
+    assert refused["detail"]["reason"] == "not_visible"
     # The secret is nowhere in the trail.
     secret = minted["token"].split(".", 1)[1]
     assert secret not in json.dumps(events, default=str)
@@ -1246,9 +1473,10 @@ async def test_the_portfolio_entry_lists_the_ids_that_were_returned(client) -> N
     assert event["detail"]["count"] == 2
 
 
-async def test_refused_calls_are_recorded_and_say_why_to_the_operator_only(
-    client,
-) -> None:
+async def test_only_a_token_that_exists_leaves_a_trail_row_when_refused(client) -> None:
+    """A malformed or unknown token is nobody's and is never a row (the trail is
+    append-only: a flood must not grow it). A token that exists is somebody's, so a
+    refusal of it is a row that says why, to the operator only."""
     minted = await mint(client, ALICE)
     revoked = await mint(client, ALICE)
     async with as_user(client, ALICE) as session:
@@ -1256,14 +1484,14 @@ async def test_refused_calls_are_recorded_and_say_why_to_the_operator_only(
     expired = await mint(client, ALICE)
     set_clock(client, NOW + timedelta(hours=9))
     token_id, secret = minted["id"], minted["token"].split(".", 1)[1]
-    attempts = {
-        "malformed": ("Bearer nonsense", None),
-        "unknown": (f"Bearer agt_{'e' * 16}.{secret}", "e" * 16),
-        "revoked": (f"Bearer {revoked['token']}", revoked["id"]),
-        "expired": (f"Bearer {expired['token']}", expired["id"]),
-        "wrong secret": (f"Bearer agt_{token_id}.{'B' * 43}", token_id),
-    }
-    for header, _ in attempts.values():
+    attempts = [
+        ("Bearer nonsense", None),
+        (f"Bearer agt_{'e' * 16}.{secret}", None),  # no such token
+        (f"Bearer {revoked['token']}", revoked["id"]),
+        (f"Bearer {expired['token']}", expired["id"]),
+        (f"Bearer agt_{token_id}.{'B' * 43}", token_id),  # wrong secret
+    ]
+    for header, _ in attempts:
         async with AsyncClient(
             transport=ASGITransport(app=client.app),
             base_url="http://api.test",
@@ -1271,19 +1499,11 @@ async def test_refused_calls_are_recorded_and_say_why_to_the_operator_only(
         ) as http:
             assert (await http.get("/api/agent/portfolio")).status_code == 401
     refused = [e for e in await trail() if e["action"] == "agent_refused"]
-    assert [e["detail"]["reason"] for e in refused] == [
-        "malformed", "unknown", "revoked", "expired", "unknown",
-    ]  # fmt: skip
+    assert [e["detail"]["reason"] for e in refused] == ["revoked", "expired", "unknown"]
     assert all(e["via"] == "agent" for e in refused)
-    assert [e["token_id"] for e in refused] == [t for _, t in attempts.values()]
-    # Whoever held a real secret is that person; a guess is nobody.
-    assert [e["actor"] for e in refused] == [
-        "unknown",
-        "unknown",
-        ALICE,
-        ALICE,
-        "unknown",
-    ]
+    assert [e["token_id"] for e in refused] == [t for _, t in attempts if t]
+    # Whoever held a real secret is that person; a wrong secret is nobody.
+    assert [e["actor"] for e in refused] == [ALICE, ALICE, "unknown"]
     assert all(e["detail"]["identity_header_ignored"] is True for e in refused)
     assert all(e["detail"]["route"] == "/api/agent/portfolio" for e in refused)
     text = json.dumps(refused, default=str)
@@ -1300,8 +1520,8 @@ async def test_agent_calls_also_reach_the_security_log_without_the_secret(
     configure_logging("info", "json", stream=buffer)
     try:
         async with as_agent(client, minted["token"]) as agent:
-            await agent.get("/api/agent/projects/p")
-            await agent.get("/api/agent/projects/missing")
+            await agent.get(f"/api/agent/projects/{R('p')}")
+            await agent.get(f"/api/agent/projects/{R('missing')}")
         async with as_agent(client, "agt_" + "1" * 16 + "." + "Z" * 43) as bad:
             await bad.get("/api/agent/me")
     finally:
@@ -1312,8 +1532,9 @@ async def test_agent_calls_also_reach_the_security_log_without_the_secret(
     ]
     refused = [x for x in lines if x.get("event") == "agent.refused"]
     assert read and read[0]["token_id"] == minted["id"] and read[0]["project"] == "p"
-    assert len(refused) == 2
-    assert {r["reason"] for r in refused} == {"unknown", "not_visible"}
+    # The bad token is not an event of its own (it is counted: see the flood tests);
+    # the verified token's project it could not see is.
+    assert len(refused) == 1 and refused[0]["reason"] == "not_visible"
     assert minted["token"] not in buffer.getvalue()
     assert minted["token"].split(".", 1)[1] not in buffer.getvalue()
 
@@ -1327,6 +1548,20 @@ async def test_use_is_noted_on_the_token(client) -> None:
         await agent.get("/api/agent/me")
     [after] = await rows_of("SELECT last_used_at FROM agent_token")
     assert after["last_used_at"] == NOW + timedelta(minutes=5)
+
+
+async def test_using_a_token_notes_that_token_and_no_other(client) -> None:
+    mine, other = await mint(client, ALICE), await mint(client, BOB)
+    set_clock(client, NOW + timedelta(minutes=5))
+    async with as_agent(client, mine["token"]) as agent:
+        await agent.get("/api/agent/me")
+        await agent.get("/api/agent/portfolio")
+    used = {
+        r["token_id"]: r["last_used_at"]
+        for r in await rows_of("SELECT token_id, last_used_at FROM agent_token")
+    }
+    assert used[mine["id"]] == NOW + timedelta(minutes=5)
+    assert used[other["id"]] is None
 
 
 # --- the rate limit ----------------------------------------------------------------
@@ -1353,29 +1588,194 @@ async def test_an_agent_token_has_its_own_lower_limit() -> None:
         assert client.app.state.settings.agent_rate_limit_max_requests < 240
 
 
-async def test_a_flood_of_bad_tokens_is_limited_by_source_and_never_by_the_header() -> (
+def _fresh_token(i: int) -> str:
+    return f"agt_{i:016x}." + "A" * 43
+
+
+async def _agent_rows() -> int:
+    [row] = await rows_of("SELECT count(*) AS n FROM access_event WHERE via = 'agent'")
+    return row["n"]
+
+
+async def test_a_flood_of_bad_tokens_writes_nothing_and_never_blocks_a_real_token() -> (
     None
 ):
+    """Unauthenticated callers must not be able to grow the append-only trail, or to
+    lock a working agent out by flooding from its address (#164 review)."""
+    from app.agent_limits import REFUSAL_ROWS_PER_WINDOW
+
+    async with running(agent_failure_rate_limit_max_requests=20) as client:
+        victim = await mint(client, ALICE)
+        known = await mint(client, BOB)  # an id the attacker has seen
+        before = await _agent_rows()
+        buffer = io.StringIO()
+        configure_logging("info", "json", stream=buffer)
+        codes: list[int] = []
+        try:
+            async with AsyncClient(
+                transport=ASGITransport(app=client.app), base_url="http://api.test"
+            ) as attacker:
+                for i in range(5000):
+                    # Mostly fresh well-formed tokens, some naming a real token id.
+                    token = (
+                        f"agt_{known['id']}." + "B" * 43
+                        if i % 10 == 0
+                        else _fresh_token(i)
+                    )
+                    r = await attacker.get(
+                        "/api/agent/me", headers={"Authorization": f"Bearer {token}"}
+                    )
+                    codes.append(r.status_code)
+                    if i % 1000 == 0:
+                        # The same source, a working token: still served.
+                        async with as_agent(client, victim["token"]) as ok:
+                            assert (await ok.get("/api/agent/me")).status_code == 200
+            client.app.state.agent_guard.flush()
+        finally:
+            configure_logging("info", "json", stream=io.StringIO())
+        # 20 failures were answered 401, then 429 for the rest, and nothing was
+        # written for any of them beyond the bound.
+        assert codes.count(401) == 20 and codes.count(429) == 4980
+        grown = await _agent_rows() - before - 5  # five successful victim calls
+        assert 0 <= grown <= REFUSAL_ROWS_PER_WINDOW
+        # One aggregated security-log line for the source, with the count.
+        lines = [
+            json.loads(x) for x in buffer.getvalue().splitlines() if x.startswith("{")
+        ]
+        summaries = [x for x in lines if x.get("event") == "agent.failures"]
+        assert len(summaries) == 1
+        assert summaries[0]["count"] == 5000 and summaries[0]["limited"] is True
+        assert not [x for x in lines if x.get("event") == "agent.refused"][
+            REFUSAL_ROWS_PER_WINDOW:
+        ]
+        # And the real token, from the flooded source, is still served.
+        async with as_agent(client, victim["token"]) as ok:
+            assert (await ok.get("/api/agent/portfolio")).status_code == 200
+
+
+async def test_nobody_can_spend_another_tokens_allowance_by_naming_it() -> None:
+    """Wrong-secret requests that name a real token's public id spend the source's
+    failures and not the token's own allowance, and leave its trail alone beyond the
+    bound (#164 review)."""
+    from app.agent_limits import REFUSAL_ROWS_PER_WINDOW
+
     async with running(
-        rate_limit_max_requests=4, agent_rate_limit_max_requests=2
+        agent_rate_limit_max_requests=5, agent_failure_rate_limit_max_requests=10_000
     ) as client:
+        victim = await mint(client, ALICE)
+        async with AsyncClient(
+            transport=ASGITransport(app=client.app), base_url="http://api.test"
+        ) as attacker:
+            for _ in range(300):
+                r = await attacker.get(
+                    "/api/agent/me",
+                    headers={"Authorization": f"Bearer agt_{victim['id']}.{'C' * 43}"},
+                )
+                assert r.status_code == 401
+        # The victim still has its whole allowance.
+        async with as_agent(client, victim["token"]) as ok:
+            codes = [(await ok.get("/api/agent/me")).status_code for _ in range(6)]
+        assert codes == [200] * 5 + [429]
+        forged = [
+            e
+            for e in await trail()
+            if e["action"] == "agent_refused" and e["token_id"] == victim["id"]
+        ]
+        assert len(forged) <= REFUSAL_ROWS_PER_WINDOW
+        assert all(e["actor"] == "unknown" for e in forged)  # not attributed to Alice
+
+
+async def test_the_per_token_limit_counts_only_requests_that_verified() -> None:
+    async with running(agent_rate_limit_max_requests=3) as client:
+        one = await mint(client, ALICE)
+        async with as_agent(client, f"agt_{one['id']}." + "D" * 43) as wrong:
+            for _ in range(10):
+                assert (await wrong.get("/api/agent/me")).status_code == 401
+        async with as_agent(client, one["token"]) as ok:
+            codes = [(await ok.get("/api/agent/me")).status_code for _ in range(4)]
+        assert codes == [200, 200, 200, 429]
+
+
+async def test_the_source_is_the_peer_and_not_a_header_a_client_chooses() -> None:
+    """Direct to the API, with no TRUSTED_PROXY_CIDR, 400 bad tokens with distinct
+    X-Real-IP / X-Forwarded-For values are one source and are limited."""
+    async with running(agent_failure_rate_limit_max_requests=10) as client:
         codes = []
-        for i in range(8):
+        for i in range(400):
             async with as_agent(
                 client,
-                f"agt_{i:016x}." + "A" * 43,
+                _fresh_token(i),
                 **{
-                    "X-Forwarded-Email": f"rotating{i}@x.example",
-                    "X-Real-IP": "203.0.113.9",
+                    "X-Real-IP": f"203.0.113.{i % 250}",
+                    "X-Forwarded-For": f"198.51.100.{i % 250}",
                 },
             ) as agent:
                 codes.append((await agent.get("/api/agent/me")).status_code)
-        assert codes[:4] == [401] * 4 and set(codes[4:]) == {429}
-        # Another source is not affected.
-        async with as_agent(
-            client, "agt_" + "a" * 16 + "." + "A" * 43, **{"X-Real-IP": "203.0.113.10"}
-        ) as agent:
-            assert (await agent.get("/api/agent/me")).status_code == 401
+        assert codes.count(401) == 10 and codes.count(429) == 390
+
+
+async def test_the_proxys_address_is_believed_only_inside_the_trusted_range() -> None:
+    from app.auth import client_address
+    from starlette.requests import Request
+
+    def request(peer: str, real_ip: str | None) -> Request:
+        headers = [(b"x-real-ip", real_ip.encode())] if real_ip else []
+        return Request(
+            {"type": "http", "headers": headers, "client": (peer, 1), "method": "GET"}
+        )
+
+    inside = make_settings(trusted_proxy_cidrs=["10.0.0.0/8"])
+    unset = make_settings()
+    assert client_address(request("10.1.2.3", "203.0.113.9"), inside) == "203.0.113.9"
+    assert client_address(request("10.1.2.3", None), inside) == "10.1.2.3"
+    assert client_address(request("10.1.2.3", "not an ip"), inside) == "10.1.2.3"
+    # Outside the range the header is a client's claim: the peer is the source.
+    assert client_address(request("192.0.2.7", "203.0.113.9"), inside) == "192.0.2.7"
+    assert client_address(request("10.1.2.3", "203.0.113.9"), unset) == "10.1.2.3"
+
+
+async def test_behind_a_trusted_proxy_each_client_is_its_own_source() -> None:
+    """With the lock set and the peer inside it, the address the proxy reported is
+    the source: one flooded client does not limit another."""
+    async with running(
+        trusted_proxy_cidrs=["127.0.0.0/8"], agent_failure_rate_limit_max_requests=3
+    ) as client:
+        codes = {}
+        for ip in ("203.0.113.1", "203.0.113.2"):
+            got = []
+            for i in range(6):
+                async with as_agent(
+                    client, _fresh_token(i), **{"X-Real-IP": ip}
+                ) as agent:
+                    got.append((await agent.get("/api/agent/me")).status_code)
+            codes[ip] = got
+        assert codes["203.0.113.1"] == [401] * 3 + [429] * 3
+        assert codes["203.0.113.2"] == [401] * 3 + [429] * 3
+
+
+async def test_the_token_comes_from_the_authorization_header_and_nowhere_else(
+    client,
+) -> None:
+    minted = await mint(client)
+    token = minted["token"]
+    async with as_agent(client, None) as bare:
+        for kwargs in (
+            {"params": {"token": token}},
+            {"params": {"access_token": token}},
+            {"headers": {"Cookie": f"token={token}; Authorization=Bearer {token}"}},
+            {"headers": {"X-Authorization": f"Bearer {token}"}},
+            {"headers": {"X-Api-Key": token}},
+            {"headers": {"Authorization": token}},  # no scheme
+            {"headers": {"Authorization": f"Token {token}"}},
+        ):
+            r = await bare.get("/api/agent/me", **kwargs)
+            assert r.status_code == 401, kwargs
+            assert token not in r.text
+        assert (
+            await bare.get(
+                "/api/agent/me", headers={"Authorization": f"Bearer {token}"}
+            )
+        ).status_code == 200
 
 
 async def test_the_default_agent_limit_is_lower_than_the_default_session_limit() -> (
@@ -1437,7 +1837,7 @@ def test_tokens_are_compared_in_constant_time_and_only_there() -> None:
     assert "secret_hash ==" not in code and '== row["secret_hash"]' not in code
 
 
-def test_only_the_agent_module_and_the_limiter_read_a_bearer_header() -> None:
+def test_only_the_agent_module_reads_a_bearer_header() -> None:
     from pathlib import Path
 
     app = Path(__file__).resolve().parents[1] / "app"
@@ -1445,7 +1845,7 @@ def test_only_the_agent_module_and_the_limiter_read_a_bearer_header() -> None:
     readers = sorted(
         p.name for p in app.glob("*.py") if reads.search(p.read_text(encoding="utf-8"))
     )
-    assert readers == ["agent.py", "main.py"]
+    assert readers == ["agent.py"]
 
 
 async def test_the_session_identity_never_reads_a_bearer(client) -> None:
@@ -1483,3 +1883,82 @@ async def test_an_expired_token_row_is_not_resurrected_by_a_clock_that_goes_back
         assert (await agent.get("/api/agent/me")).status_code == 401
         set_clock(client, NOW + timedelta(hours=1))
         assert (await agent.get("/api/agent/me")).status_code == 200
+
+
+def test_the_access_log_does_not_keep_a_query_on_an_agent_route() -> None:
+    """The filter, on the record uvicorn writes (client, method, target, version,
+    status)."""
+    from app.securitylog import RedactAgentQuery
+
+    def line(target: str) -> str:
+        record = logging.LogRecord(
+            "uvicorn.access", logging.INFO, "", 0,
+            '%s - "%s %s HTTP/%s" %d', ("1.2.3.4:5", "GET", target, "1.1", 401), None,
+        )  # fmt: skip
+        assert RedactAgentQuery().filter(record)
+        return record.getMessage()
+
+    assert "SECRET" not in line("/api/agent/me?token=SECRET")
+    assert "/api/agent/portfolio?[redacted]" in line(
+        "/api/agent/portfolio?status=met&x=SECRET"
+    )
+    assert "SECRET" not in line("/api/agent/projects/pr_abc?access_token=SECRET")
+    # Other routes' lines are as they were.
+    assert "?status=met" in line("/api/projects?status=met")
+    assert "/api/agent/me " in line("/api/agent/me") + " "
+
+
+async def test_a_token_sent_in_a_url_is_refused_and_not_logged_by_the_server(
+    settings,
+) -> None:
+    """Through a real uvicorn with its access log on: the request is a 401 and the
+    secret is in no access-log line."""
+    import asyncio
+
+    import uvicorn
+
+    app = create_app(settings)
+    config = uvicorn.Config(
+        app, host="127.0.0.1", port=0, log_level="info", lifespan="on"
+    )
+    server = uvicorn.Server(config)
+    seen: list[str] = []
+
+    class Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            seen.append(record.getMessage())
+
+    handler = Capture()
+    serving = asyncio.create_task(server.serve())
+    for _ in range(200):
+        if server.started:
+            break
+        await asyncio.sleep(0.05)
+    logging.getLogger("uvicorn.access").addHandler(handler)
+    try:
+        await reset_database()
+        port = server.servers[0].sockets[0].getsockname()[1]
+        minted = await _mint_over_http(port)
+        token = minted["token"]
+        async with AsyncClient(base_url=f"http://127.0.0.1:{port}") as http:
+            r = await http.get(f"/api/agent/me?token={token}")
+            ok = await http.get(
+                "/api/agent/me", headers={"Authorization": f"Bearer {token}"}
+            )
+        assert r.status_code == 401 and ok.status_code == 200
+    finally:
+        logging.getLogger("uvicorn.access").removeHandler(handler)
+        server.should_exit = True
+        await serving
+    assert any("/api/agent/me?[redacted]" in m for m in seen), seen
+    assert token not in "\n".join(seen)
+    assert token.split(".", 1)[1] not in "\n".join(seen)
+
+
+async def _mint_over_http(port: int) -> dict:
+    async with AsyncClient(
+        base_url=f"http://127.0.0.1:{port}", headers=TEST_HEADERS
+    ) as http:
+        response = await http.post("/api/agent-tokens", json={})
+    assert response.status_code == 201, response.text
+    return response.json()

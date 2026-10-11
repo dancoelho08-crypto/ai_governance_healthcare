@@ -632,6 +632,62 @@ def main() -> int:
             and as_agent("/api/agent/me", minted["token"])[0] == 401,
         )
 
+        status, body = http("/api/agent-tokens", "POST", {"label": "stack flood"})
+        survivor = json.loads(body)["token"] if status == 201 else ""
+        # A flood of well-formed wrong tokens through the real proxy, each claiming a
+        # different X-Real-IP: the proxy replaces that header, so they are one source.
+        # They are answered 401 and then 429, write no read-trail row, and a working
+        # token from the same address is still served (#164 review).
+        statuses = []
+        for i in range(300):
+            req = urllib.request.Request(
+                BASE + "/api/agent/me",
+                headers={
+                    "Authorization": f"Bearer agt_{i:016x}." + "A" * 43,
+                    "X-Real-IP": f"203.0.113.{i % 250}",
+                },
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    statuses.append(r.status)
+            except urllib.error.HTTPError as e:
+                statuses.append(e.code)
+        check(
+            "a flood of wrong tokens gets 401 then 429, whatever X-Real-IP says",
+            statuses.count(401) <= 31 and statuses.count(429) >= 250,
+            f"401x{statuses.count(401)} 429x{statuses.count(429)}",
+        )
+        check(
+            "and a working token from the same source is still served",
+            as_agent("/api/agent/me", survivor)[0] == 200,
+        )
+        written = subprocess.run(
+            [
+                "docker",
+                "compose",
+                "exec",
+                "-T",
+                "db",
+                "psql",
+                "-U",
+                "chai",
+                "-d",
+                "chai",
+                "-tA",
+                "-c",
+                "SELECT count(*) FROM access_event WHERE action = 'agent_refused' "
+                f"AND token_id <> '{minted['id']}'",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        ).stdout.strip()
+        check(
+            "and the flood wrote no row to the read trail",
+            written == "0",
+            written,
+        )
+
     print("Security events (#38)")
     # The earlier checks created, purged and deleted projects through the real proxy.
     # What the API container wrote about that is what a log sink would receive.

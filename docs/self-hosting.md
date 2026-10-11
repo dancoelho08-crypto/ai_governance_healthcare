@@ -295,12 +295,15 @@ The read-only agent API ([The agent API](agent-api.md)) is **off** until
 `AGENT_ID_SECRET` is set. With it set, an agent that holds a token a person minted
 reaches three `GET` routes under `/api/agent/` with no single sign-on session. The
 Caddyfile gives that path its own block: it forwards exactly those three routes,
-deletes every identity header a client sends on them and sets none, and answers
-any
-other method or path under the prefix with a 404. Every other route is as described
-above. If a front door of yours sits in front of Caddy and authenticates every path,
-it has to let `/api/agent/` through, or the agent API cannot be used; the page says
-how, per front door, and says where it cannot be done.
+deletes the identity header names it knows (a fixed list of sixteen) as defense
+in
+depth and sets none, and answers any other method or path under the prefix with
+a
+404. The API itself reads no identity header on these routes. Every other route
+     is
+as described above. If a front door of yours sits in front of Caddy and
+authenticates every path, it has to let `/api/agent/` through, or the agent API
+cannot be used; the page says how, per front door, and says where it cannot be done.
 
 ### How the containers are locked down
 

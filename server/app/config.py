@@ -164,38 +164,40 @@ def _idle_lock_minutes() -> int:
     return int(raw)
 
 
-# The secret that makes the agent API's person ids opaque (#164). It is a key, not a
-# password a person types, so a short one is refused rather than accepted.
+# The secret that makes the agent API's person and project ids opaque (#164). It is a
+# key, not a password a person types, so a short or patterned one is refused rather
+# than accepted. `openssl rand -hex 32` (64 characters, 16 symbols) passes.
 AGENT_ID_SECRET_MIN_LENGTH = 32
+AGENT_ID_SECRET_MIN_DISTINCT = 10
+AGENT_ID_SECRET_MAX_PERIOD = 16
 
-# A status or decision value a deployment adds for a build of its own framework
-# (AGENT_EXTRA_VALUES). It is shown to an agent as the stored value, so it must look
-# like a vocabulary word and not like a name or an address.
+# What a status or decision filter on the agent API may look like, so that a query
+# parameter is a vocabulary word and not a place to put text.
 AGENT_VALUE_SHAPE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ,&/+._-]{0,63}$")
+
+
+def _weak_secret(value: str) -> str | None:
+    """Why a secret is too weak to key a pseudonym, or None."""
+    if len(value) < AGENT_ID_SECRET_MIN_LENGTH:
+        return f"shorter than {AGENT_ID_SECRET_MIN_LENGTH} characters"
+    if len(set(value)) < AGENT_ID_SECRET_MIN_DISTINCT:
+        return f"fewer than {AGENT_ID_SECRET_MIN_DISTINCT} different characters"
+    for period in range(1, AGENT_ID_SECRET_MAX_PERIOD + 1):
+        if value == (value[:period] * len(value))[: len(value)]:
+            return f"one pattern of {period} character(s) repeated"
+    return None
 
 
 def _agent_id_secret() -> str:
     value = os.environ.get("AGENT_ID_SECRET", "").strip()
-    if value and len(value) < AGENT_ID_SECRET_MIN_LENGTH:
+    problem = _weak_secret(value) if value else None
+    if problem:
         raise RuntimeError(
-            f"AGENT_ID_SECRET is set but shorter than {AGENT_ID_SECRET_MIN_LENGTH} "
-            "characters. It keys the pseudonym of every person the agent API names, "
-            "so it must be long and random: openssl rand -base64 48. Unset it to "
-            "leave the agent API off."
+            f"AGENT_ID_SECRET is set but {problem}. It keys the pseudonym of every "
+            "person and project the agent API names, so it must be long and random: "
+            "openssl rand -hex 32. Unset it to leave the agent API off."
         )
     return value
-
-
-def _agent_extra_values() -> frozenset[str]:
-    values = _csv("AGENT_EXTRA_VALUES")
-    for value in values:
-        if not AGENT_VALUE_SHAPE.fullmatch(value):
-            raise RuntimeError(
-                f"AGENT_EXTRA_VALUES holds {value!r}, which is not a status or "
-                "decision value: letters, digits, spaces and , & / + . _ - only, "
-                "up to 64 characters, starting with a letter or digit."
-            )
-    return frozenset(values)
 
 
 def _csv(name: str) -> list[str]:
@@ -400,11 +402,11 @@ class Settings:
     # Requests per token per rate-limit window. Lower than rate_limit_max_requests,
     # which a person at a dashboard needs and an agent loop does not.
     agent_rate_limit_max_requests: int = 60
+    # Failed agent calls one source may make per window before the rest are answered
+    # 429 with nothing written. Successful calls are never counted against a source.
+    agent_failure_rate_limit_max_requests: int = 30
     # Tokens a person may hold at once (not revoked, not expired).
     agent_max_active_tokens: int = 5
-    # Status and decision values beyond the published and example frameworks', for a
-    # build of another framework (D-79). Anything else is shown to an agent as null.
-    agent_extra_values: frozenset[str] = frozenset()
 
     # --- misc -------------------------------------------------------------
     version: str = "0.1.0"
@@ -609,8 +611,10 @@ class Settings:
             sign_out_url=_sign_out_url(),
             agent_id_secret=_agent_id_secret(),
             agent_rate_limit_max_requests=_int("AGENT_RATE_LIMIT_MAX_REQUESTS", 60),
+            agent_failure_rate_limit_max_requests=_int(
+                "AGENT_FAILURE_RATE_LIMIT_MAX_REQUESTS", 30
+            ),
             agent_max_active_tokens=_int("AGENT_MAX_ACTIVE_TOKENS", 5),
-            agent_extra_values=_agent_extra_values(),
             version=_str("APP_VERSION", "0.1.0"),
             log_page_size=_int("LOG_PAGE_SIZE", 60),
         )

@@ -50,7 +50,7 @@ plain HTTP (TLS is terminated at the front door), and expects:
 | `SSE_MAX_LIFETIME_SECONDS`, `IDLE_LOCK_MINUTES`, `SIGN_OUT_URL` | Optional session controls. See [Session lifetime and automatic logoff](#session-lifetime-and-automatic-logoff). |
 | `LOG_FORMAT` | `json` (default) or `text`. See [Security events](#security-events-collecting-retaining-and-alerting). |
 | `EMERGENCY_ACCESS_IDS` | Optional. Identity ids with owner rights on every project, every use audited. See [Offboarding, and emergency access](#offboarding-and-emergency-access). |
-| `AGENT_ID_SECRET`, `AGENT_RATE_LIMIT_MAX_REQUESTS`, `AGENT_MAX_ACTIVE_TOKENS`, `AGENT_EXTRA_VALUES` | Optional. The read-only agent API is **off** until `AGENT_ID_SECRET` is set. See [The agent API](agent-api.md), which also says what to let through your front door. |
+| `AGENT_ID_SECRET`, `AGENT_RATE_LIMIT_MAX_REQUESTS`, `AGENT_FAILURE_RATE_LIMIT_MAX_REQUESTS`, `AGENT_MAX_ACTIVE_TOKENS` | Optional. The read-only agent API is **off** until `AGENT_ID_SECRET` is set. See [The agent API](agent-api.md), which also says what to let through your front door. |
 | `RUN_MIGRATIONS` | `false` when the API serves as a restricted role, which cannot create tables. A migration job runs instead. |
 | `DATABASE_URL` | The **owner's** connection string, for the migration job only. A single-role deployment may put it here and omit the two above, which works and is reported as a weaker setup. |
 | `IDENTITY_MODE` | `iap`, `alb` or `easyauth` — which header to read. |
@@ -461,7 +461,8 @@ recording that a project was deleted.
 | `record.exported` | info | `actor`, `action`, `project`, `format`, `source_ip` | The dashboard reported an export. |
 | `agent_token.minted` | info | `actor`, `token_id`, `expires_at` | A person minted an agent token ([Agent API](agent-api.md)). The token's public id, never its secret. |
 | `agent_token.revoked` | info | `actor`, `token_id`, `by` | A person revoked one of their own agent tokens. An operator's revocation is a row in `agent_token`, not an event: the script's output is the record. |
-| `agent.refused` | warning | `actor`, `action`, `project`, `source_ip`, `via`, `token_id`, `reason`, `route` | An agent call was refused: a token that is wrong, expired or revoked (the caller is told only that it is invalid; `reason` says which), or a project the token's user cannot see. A burst from one `source_ip` is a guesser. |
+| `agent.refused` | warning | `actor`, `action`, `project`, `source_ip`, `via`, `token_id`, `reason`, `route` | An agent call was refused and is a read-trail row: a token that exists but is expired, revoked or given the wrong secret (`reason` says which; the caller is only told it is invalid), or a project the token's user cannot see. At most five per token id and source per window. |
+| `agent.failures` | warning | `source`, `count`, `limit`, `window_seconds`, `limited` | The failed agent calls (bad, unknown, expired or revoked tokens) one source made in one window, written when the window closes. No row is written for them unless they name a token that exists. `limited` is true when the source went over its limit and was answered 429 for the rest. A large `count` is a guesser. |
 
 The names are an interface: an alert is written against them, so a test fails if
 this table and the code ever disagree.

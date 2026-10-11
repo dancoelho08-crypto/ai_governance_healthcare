@@ -74,6 +74,10 @@ GRANTS: Mapping[str, tuple[str, ...]] = {
     # those two columns move, and no DELETE is granted: a token leaves by expiring, or
     # with its principal (ON DELETE CASCADE, which runs with the owner's rights).
     "agent_token": ("SELECT", "INSERT", "UPDATE"),
+    # The words an agent may be shown, loaded from the build's manifest by the migrate
+    # job (014, D-89). The API only reads it: a compromised API cannot widen what an
+    # agent is shown.
+    "agent_vocabulary": ("SELECT",),
 }
 
 # Tables the API must never touch at all: the owner's migration bookkeeping.

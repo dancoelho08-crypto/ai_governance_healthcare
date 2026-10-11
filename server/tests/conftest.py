@@ -145,6 +145,19 @@ async def reset_retirement_rules(conn: asyncpg.Connection) -> None:
     await conn.execute(RETIREMENT_MIGRATION.read_text(encoding="utf-8"))
 
 
+DEFAULT_MANIFEST = (
+    Path(__file__).resolve().parents[2] / "docs" / "app" / "manifest.json"
+)
+
+
+async def reset_vocabulary(conn: asyncpg.Connection) -> None:
+    """Load the default build's vocabulary, as the migrate job does (D-89)."""
+    from app.retirement import parse_manifest, sync_vocabulary
+
+    manifest = parse_manifest(DEFAULT_MANIFEST.read_text(encoding="utf-8"))
+    await sync_vocabulary(conn, manifest)
+
+
 async def reset_database() -> None:
     """Empty every table, as the OWNER, whichever role the API under test uses."""
     conn = await asyncpg.connect(DB_URL)
@@ -169,6 +182,7 @@ async def reset_database() -> None:
             "UPDATE retention_policy SET record_years = 6, read_trail_years = 6"
         )
         await reset_retirement_rules(conn)
+        await reset_vocabulary(conn)
     finally:
         await conn.close()
 

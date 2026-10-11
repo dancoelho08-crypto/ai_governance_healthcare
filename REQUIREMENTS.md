@@ -1364,13 +1364,17 @@ honest answer and is a gap worth closing; see R-19.
       strips it and sets none.
     - **Stored values only.** Statuses, decisions, dates and one comparison of a
       due date with today; no computed phase, flag, color or verdict; no free
-      text (no note, rationale or evidence title); people as opaque ids, never
-      names or emails. A response is built from an allowlist of fields, never by
+      text (no note, rationale, evidence title or project name). A key a writer
+      chose is returned only if it is a word of the build's framework definitions,
+      a project as an opaque reference, a person as an opaque id, never a name or
+      an email. A response is built from an allowlist of fields, never by
       filtering the stored document.
-    - **Recorded and limited.** Every call, answered or refused, is in the read
-      trail marked as agent access with the token's public id (never the
-      secret), and has a rate limit lower than a session's. Every bad token gets
-      the same 401.
+    - **Recorded and limited.** Every answered call, and every refusal of a token
+      that exists, is in the read trail marked as agent access with the token's
+      public id (never the secret). A flood of unknown tokens is counted, not
+      recorded row by row, and cannot grow the trail or lock out a working token.
+      A token has a rate limit lower than a session's, spent only by calls that
+      verified. Every bad token gets the same 401.
 - This narrows R-06 ("never ... a token", "no token endpoint") for the agent
   routes only, by the owner's decision on #164 (2026-10-10, decisions 1 to 5).
   Where an answer goes after it leaves the server (to a model, for one) is the

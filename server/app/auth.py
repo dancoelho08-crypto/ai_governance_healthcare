@@ -71,6 +71,7 @@ __all__ = [
     "DEV_BANNER",
     "Identity",
     "check_network_locks",
+    "client_address",
     "identity_from_request",
     "log_auth_posture",
 ]
@@ -159,6 +160,31 @@ def _networks(cidrs: list[str]) -> list[ipaddress._BaseNetwork]:
         except ValueError:
             log.error("ignoring unparseable TRUSTED_PROXY_CIDR entry %r", cidr)
     return nets
+
+
+def client_address(request: Request, settings: Settings) -> str:
+    """Who the rate limiter should count a request against: the socket peer.
+
+    ``X-Real-IP`` is a header, so a client that reaches the API directly chooses it.
+    It is believed only when ``TRUSTED_PROXY_CIDR`` is set and the peer is inside it,
+    that is, when the peer is the proxy that wrote it. Otherwise (no range set) every
+    caller behind the proxy shares the proxy's address, which limits them together
+    but cannot be rotated by a client.
+    """
+    peer = request.client.host if request.client else ""
+    if not peer or not settings.trusted_proxy_cidrs:
+        return peer
+    try:
+        ip = ipaddress.ip_address(peer)
+    except ValueError:
+        return peer
+    if not any(ip in net for net in _networks(settings.trusted_proxy_cidrs)):
+        return peer
+    reported = (request.headers.get("x-real-ip") or "").strip()
+    try:
+        return str(ipaddress.ip_address(reported))
+    except ValueError:
+        return peer
 
 
 def _check_peer(request: Request, settings: Settings) -> None:

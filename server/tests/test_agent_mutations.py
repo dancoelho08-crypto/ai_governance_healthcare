@@ -98,33 +98,6 @@ MUTANTS: tuple[Mutant, ...] = (
         ),
     ),
     Mutant(
-        "a status is passed on whatever it says",
-        "app/agent.py",
-        "return value if isinstance(value, str) and value in self.statuses else None",
-        "return value if isinstance(value, str) else None",
-        (
-            "test_nothing_hostile_planted_anywhere_reaches_an_agent",
-            "test_a_deployments_own_values_pass_and_nothing_else_does",
-        ),
-    ),
-    Mutant(
-        "a decision is passed on whatever it says",
-        "app/agent.py",
-        "return value if isinstance(value, str) and value in self.decisions else None",
-        "return value if isinstance(value, str) else None",
-        (
-            "test_nothing_hostile_planted_anywhere_reaches_an_agent",
-            "test_a_deployments_own_values_pass_and_nothing_else_does",
-        ),
-    ),
-    Mutant(
-        "an item id or gate key need not look like one",
-        "app/agent.py",
-        " and _KEY.fullmatch(k))",
-        ")",
-        ("test_nothing_hostile_planted_anywhere_reaches_an_agent",),
-    ),
-    Mutant(
         "a call is not written to the read trail",
         "app/agent.py",
         "await record_access(",
@@ -178,25 +151,6 @@ MUTANTS: tuple[Mutant, ...] = (
         ("test_a_minted_token_has_the_shape_and_the_fixed_lifetime",),
     ),
     Mutant(
-        "the agent limit is not applied",
-        "app/main.py",
-        "if not await agent_limiter.allow(key):",
-        "if False:",
-        ("test_an_agent_token_has_its_own_lower_limit",),
-    ),
-    Mutant(
-        "the agent limit is keyed on the identity header",
-        "app/main.py",
-        '                    key = (\n                        f"agent:{presented.token_id}"\n'
-        "                        if presented.token_id\n"
-        '                        else f"agent-bad:{source}"\n                    )',
-        "                    key = _rate_limit_key(request, settings)",
-        (
-            "test_a_flood_of_bad_tokens_is_limited_by_source_and_never_by_the_header",
-            "test_an_agent_token_has_its_own_lower_limit",
-        ),
-    ),
-    Mutant(
         "the identity header is honored on an agent route",
         "app/agent.py",
         '    presented = parse_bearer(request.headers.get("authorization"))\n'
@@ -212,10 +166,10 @@ MUTANTS: tuple[Mutant, ...] = (
     Mutant(
         "an expired token is told apart from a wrong one",
         "app/agent.py",
-        "        raise _unauthorized()\n    request.state.agent_presented",
-        "        if verified.refusal.value == 'expired':\n"
-        "            raise HTTPException(401, 'This token has expired.')\n"
-        "        raise _unauthorized()\n    request.state.agent_presented",
+        "    raise _unauthorized()\n\n\ndef _as_identity",
+        "    if verified.refusal.value == 'expired':\n"
+        "        raise HTTPException(401, 'This token has expired.')\n"
+        "    raise _unauthorized()\n\n\ndef _as_identity",
         ("test_every_bad_token_gets_the_same_401",),
     ),
     Mutant(
@@ -366,6 +320,224 @@ MUTANTS: tuple[Mutant, ...] = (
         suite="tests/test_agent_docs.py",
     ),
     Mutant(
+        "the archived filter is skipped on one project",
+        "app/agent.py",
+        '            if (row["doc"] or {}).get("archived"):\n                continue',
+        "            if False:\n                continue",
+        ("test_an_archived_project_is_never_returned_by_any_route",),
+    ),
+    Mutant(
+        "an item id is returned whatever it says",
+        "app/agent.py",
+        "for k in answers if vocab.item(framework_id, k)",
+        "for k in answers if isinstance(k, str)",
+        (
+            "test_a_key_a_writer_chose_never_reaches_an_agent",
+            "test_nothing_hostile_planted_anywhere_reaches_an_agent",
+        ),
+    ),
+    Mutant(
+        "a checkpoint id is returned whatever it says",
+        "app/agent.py",
+        "for k in gates if vocab.gate(framework_id, k)",
+        "for k in gates if isinstance(k, str)",
+        ("test_a_key_a_writer_chose_never_reaches_an_agent",),
+    ),
+    Mutant(
+        "a supplement key is returned whatever it says",
+        "app/agent.py",
+        "for key in sorted(k for k in doc if vocab.role(k) is FrameworkRole.SUPPLEMENT):",
+        "for key in sorted(k for k in doc if isinstance(k, str)):",
+        ("test_a_key_a_writer_chose_never_reaches_an_agent",),
+    ),
+    Mutant(
+        "a status is returned whatever it says",
+        "app/agent.py",
+        "return value if self._has(framework_id, VocabKind.STATUSES, value) else None",
+        "return value if isinstance(value, str) else None",
+        (
+            "test_nothing_hostile_planted_anywhere_reaches_an_agent",
+            "test_a_builds_own_words_pass_and_the_published_ones_do_not_cross_over",
+        ),
+    ),
+    Mutant(
+        "a decision is returned whatever it says",
+        "app/agent.py",
+        "return value if self._has(framework_id, VocabKind.DECISIONS, value) else None",
+        "return value if isinstance(value, str) else None",
+        (
+            "test_nothing_hostile_planted_anywhere_reaches_an_agent",
+            "test_a_builds_own_words_pass_and_the_published_ones_do_not_cross_over",
+        ),
+    ),
+    Mutant(
+        "an item is read against another framework's words",
+        "app/agent.py",
+        "        return self._has(framework_id, VocabKind.ITEMS, key)",
+        "        return any(k == VocabKind.ITEMS.value and key == w for (_, k), ws in self._words.items() for w in ws)",
+        ("test_a_builds_own_words_pass_and_the_published_ones_do_not_cross_over",),
+    ),
+    Mutant(
+        "a project is shown by its own id",
+        "app/agent.py",
+        'ref=project_ref(secret, row["id"]),',
+        'ref=row["id"],',
+        (
+            "test_a_key_a_writer_chose_never_reaches_an_agent",
+            "test_a_project_ref_is_stable_keyed_and_resolves_only_what_is_visible",
+        ),
+    ),
+    Mutant(
+        "no vocabulary is read, so everything shows",
+        "app/agent.py",
+        '        rows = await conn.fetch(\n            "SELECT framework_id, kind, value FROM agent_vocabulary"\n        )',
+        "        rows = []",
+        ("test_a_builds_own_words_pass_and_the_published_ones_do_not_cross_over",),
+    ),
+    Mutant(
+        "the per-token limit is not applied",
+        "app/agent.py",
+        "if not await guard.allow_token(verified.caller.token_id):",
+        "if False:",
+        ("test_an_agent_token_has_its_own_lower_limit",),
+    ),
+    Mutant(
+        "the failure bucket is not applied",
+        "app/agent.py",
+        "if not guard.charge_failure(source):",
+        "if not (guard.charge_failure(source) or True):",
+        (
+            "test_a_flood_of_bad_tokens_writes_nothing_and_never_blocks_a_real_token",
+            "test_the_source_is_the_peer_and_not_a_header_a_client_chooses",
+        ),
+    ),
+    Mutant(
+        "a failure names a token and spends its allowance",
+        "app/agent.py",
+        "    source = client_address(request, settings)\n",
+        "    source = client_address(request, settings)\n"
+        "    if presented.token_id:\n"
+        "        await guard.per_token.allow(presented.token_id)\n",
+        (
+            "test_nobody_can_spend_another_tokens_allowance_by_naming_it",
+            "test_the_per_token_limit_counts_only_requests_that_verified",
+        ),
+    ),
+    Mutant(
+        "an unknown token is a trail row",
+        "app/agent.py",
+        "        verified.known_id\n        and presented.token_id\n",
+        "        presented.token_id\n",
+        (
+            "test_a_flood_of_bad_tokens_writes_nothing_and_never_blocks_a_real_token",
+            "test_only_a_token_that_exists_leaves_a_trail_row_when_refused",
+        ),
+    ),
+    Mutant(
+        "a known token's refusals are unbounded rows",
+        "app/agent.py",
+        "        and await guard.may_write_row(presented.token_id, source)\n",
+        "",
+        (
+            "test_a_flood_of_bad_tokens_writes_nothing_and_never_blocks_a_real_token",
+            "test_nobody_can_spend_another_tokens_allowance_by_naming_it",
+        ),
+    ),
+    Mutant(
+        "the source is taken from X-Forwarded-For",
+        "app/agent.py",
+        "    source = client_address(request, settings)\n",
+        "    source = request.headers.get('x-forwarded-for') or client_address(\n"
+        "        request, settings\n    )\n",
+        ("test_the_source_is_the_peer_and_not_a_header_a_client_chooses",),
+    ),
+    Mutant(
+        "X-Real-IP is believed from any peer",
+        "app/auth.py",
+        "    if not peer or not settings.trusted_proxy_cidrs:\n        return peer",
+        "    if not peer:\n        return peer",
+        (
+            "test_the_source_is_the_peer_and_not_a_header_a_client_chooses",
+            "test_the_proxys_address_is_believed_only_inside_the_trusted_range",
+        ),
+        extra=(
+            (
+                "app/auth.py",
+                "    if not any(ip in net for net in _networks(settings.trusted_proxy_cidrs)):\n        return peer",
+                "    if False:\n        return peer",
+            ),
+        ),
+    ),
+    Mutant(
+        "X-Real-IP is believed from a peer outside the range",
+        "app/auth.py",
+        "    if not any(ip in net for net in _networks(settings.trusted_proxy_cidrs)):\n        return peer",
+        "    if False:\n        return peer",
+        ("test_the_proxys_address_is_believed_only_inside_the_trusted_range",),
+    ),
+    Mutant(
+        "a token is accepted from a query parameter",
+        "app/agent.py",
+        '    presented = parse_bearer(request.headers.get("authorization"))\n    async with db.acquire() as conn:\n        verified',
+        '    presented = parse_bearer(\n        request.headers.get("authorization")\n        or "Bearer " + request.query_params.get("token", "")\n    )\n    async with db.acquire() as conn:\n        verified',
+        ("test_the_token_comes_from_the_authorization_header_and_nowhere_else",),
+    ),
+    Mutant(
+        "a use is noted on every token",
+        "app/agent.py",
+        '"UPDATE agent_token SET last_used_at = $2 WHERE token_id = $1",',
+        '"UPDATE agent_token SET last_used_at = $2 WHERE $1::text IS NOT NULL",',
+        ("test_using_a_token_notes_that_token_and_no_other",),
+    ),
+    Mutant(
+        "a repeated-pattern secret is accepted",
+        "app/config.py",
+        "        if value == (value[:period] * len(value))[: len(value)]:",
+        "        if False:",
+        ("test_a_weak_secret_stops_the_server_starting",),
+    ),
+    Mutant(
+        "a low-variety secret is accepted",
+        "app/config.py",
+        "    if len(set(value)) < AGENT_ID_SECRET_MIN_DISTINCT:",
+        "    if False:",
+        ("test_a_weak_secret_stops_the_server_starting",),
+    ),
+    Mutant(
+        "the access log keeps an agent query string",
+        "app/securitylog.py",
+        "            if mark and path.startswith(self.PREFIX):",
+        "            if False:",
+        (
+            "test_the_access_log_does_not_keep_a_query_on_an_agent_route",
+            "test_a_token_sent_in_a_url_is_refused_and_not_logged_by_the_server",
+        ),
+    ),
+    Mutant(
+        "loading the words does not replace the old ones",
+        "app/retirement.py",
+        '        await conn.execute("DELETE FROM agent_vocabulary")',
+        '        await conn.execute("SELECT 1")',
+        ("test_loading_replaces_the_table_wholesale",),
+        suite="tests/test_agent_vocabulary.py",
+    ),
+    Mutant(
+        "the migrate job does not load the words",
+        "app/migrate.py",
+        "            words = await sync_vocabulary(conn, manifest)",
+        "            words = 0",
+        ("test_the_migrate_job_loads_the_words_from_the_manifest",),
+        suite="tests/test_agent_vocabulary.py",
+    ),
+    Mutant(
+        "the server accepts a word twice",
+        "app/retirement.py",
+        '        _need(len(set(words)) == len(words), f"{where}.{kind} lists a word twice")',
+        "        pass",
+        ("test_the_server_reads_the_words_strictly",),
+        suite="tests/test_agent_vocabulary.py",
+    ),
+    Mutant(
         "a mint needs no signed-in person",
         "app/agent.py",
         "    if identity.id in NOT_PEOPLE or not settings.require_identity:",
@@ -376,6 +548,13 @@ MUTANTS: tuple[Mutant, ...] = (
 
 
 def _copy_server(into: Path) -> Path:
+    for name in (
+        "docs/app/manifest.json",
+        "scripts/build_manifest.py",
+        "scripts/framework_enums.py",
+    ):
+        (into / name).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(SERVER.parent / name, into / name)
     for name in ("docs/agent-api.md", "zensical.toml", ".env.example", "compose.yaml"):
         (into / name).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(SERVER.parent / name, into / name)
@@ -469,6 +648,11 @@ async def test_each_guard_is_noticed_when_broken(mutant: Mutant) -> None:
             text += mutant.append
             assert text != target.read_text(encoding="utf-8")
             target.write_text(text, encoding="utf-8")
+            for path, old, new in mutant.extra:
+                other = tree / path
+                body = other.read_text(encoding="utf-8")
+                assert old in body, f"{mutant.name}: {path}: text not found"
+                other.write_text(body.replace(old, new), encoding="utf-8")
             return await asyncio.to_thread(
                 _pytest, tree, url, mutant.caught_by, (mutant.suite,)
             )

@@ -2772,12 +2772,13 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
        when, never verdicts. The MCP service is PR 3: separate, optional, off by
        default. The docs name no client or model.
 - **How it is built.**
-    - Routes. `/api/agent/me`, `/api/agent/portfolio`, `/api/agent/projects/{id}`:
-      GET only, and the only routes that read a token. The routes that mint, list
-      and revoke (`/api/agent-tokens`) take the session identity and never a token,
-      so a stolen token cannot extend itself. The prefix is `/api/agent/`
-      exactly, so
-      `/api/agent-tokens` is not under it.
+    - Routes. `/api/agent/me`, `/api/agent/portfolio` and
+      `/api/agent/projects/{ref}`: GET only, and the only routes that read a token.
+      The routes that mint, list and revoke (`/api/agent-tokens`) take the session
+      identity and never a token, so a stolen token cannot extend itself. The prefix
+      is `/api/agent/` exactly, so `/api/agent-tokens` is not under it. The
+      token is
+      read from the Authorization header and nowhere else.
     - Token. `agt_<16 hex id>.<43 chars of url-safe base64>`: 256 random bits. The
       id is public (the row, the log, the limiter's key); only SHA-256 of the whole
       token is stored, compared with `hmac.compare_digest`; shown once. A CHECK
@@ -2793,25 +2794,73 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
       the agent API both call it, so they cannot drift; the agent adds "not
       archived", and never passes `emergency`.
     - Allowlist. A new pydantic model per response, filled field by field from named
-      stored keys that are shape-checked. Statuses and decisions must be words the
-      framework definitions use (`ItemStatus`, `GateDecision`, kept equal to the
-      definitions by a test) or a deployment's `AGENT_EXTRA_VALUES`; item and
-      checkpoint ids must look like ids; dates must be real ISO dates. Anything
-      else
-      is null or dropped.
-    - Opaque id. `u_` and the first 128 bits of HMAC-SHA256 keyed by
-      `AGENT_ID_SECRET`, over the identity id. Stable in a deployment, and not
-      reversible without the key (it is a pseudonym: whoever holds the key and a
-      candidate list can test candidates, so the key is kept like a password and
-      is
-      in no table). The principal id itself is the identity (usually an email)
-      and is
-      not opaque. This does not reopen D-54: nothing stored is pseudonymized.
+      stored keys. A record is opaque JSON the browser owns, so its keys and values
+      are whatever a writer typed (a project id, an item key, a checkpoint key
+      and a
+      supplement key can each be a sentence about a patient), and no pattern
+      tells a
+      name from an id. So a key or a value is returned only if it is a word of the
+      framework definitions of the build: the item ids, checkpoint ids, status
+      values, checkpoint options and supplement ids. The server image is
+      framework-neutral (D-76), so the words travel the way the retirement rules
+      do:
+      `scripts/build_manifest.py` writes them into `manifest.json` (a `vocab` of
+      four
+      lists per framework), the migrate job (and an API with `RUN_MIGRATIONS=true`
+      and a manifest) loads them into `agent_vocabulary` (migration 014), replacing
+      the rows wholesale on every run, and the API checks each against the framework
+      the record follows. Unlike the retirement rules this needs no acknowledgment
+      and keeps no history: the words decide only what an agent may see and nothing
+      about disposal, so a wrong load shows an agent less or more, never changes
+      when
+      a record is destroyed; they are outside the rule-set hash, and the API
+      role may
+      only read the table. A manifest with no words empties it, and an agent is
+      shown
+      no item or checkpoint. A project id is chosen by the client and can be
+      anything, so it is returned as a reference (below), and dates must be real
+      ISO
+      dates. This replaces the hand-kept `ItemStatus`, `GateDecision` and
+      `AGENT_EXTRA_VALUES`: a build of another framework carries its own words
+      in its
+      own manifest (D-79), so there is nothing left to list by hand.
+    - Opaque ids. A person is `u_` and the first 128 bits of HMAC-SHA256 keyed by
+      `AGENT_ID_SECRET`, over the identity id; a project is `pr_` and the same
+      construction over the project id, the HMAC input carrying a different domain
+      prefix for each. Stable in a deployment, and not reversible without the
+      key (a
+      pseudonym: whoever holds the key and a candidate list can test candidates,
+      so
+      the key is kept like a password and is in no table, and the server refuses
+      a
+      short, patterned or low-variety one). The principal id itself is the identity
+      (usually an email) and is not opaque. This does not reopen D-54: nothing stored
+      is pseudonymized. `GET /api/agent/projects/{ref}` finds the ref by
+      scanning the
+      rows the person's dashboard shows, so an unknown, an invisible and an archived
+      project are one 404. In v1 an agent can say "project `pr_...` has criterion
+      `s1-3` marked `notmet`" and cannot name the project; a name would arrive
+      as an
+      explicit opt-in, labeled untrusted text, as the issue says of free text.
+    - Limits. The token is checked before anything is limited (one indexed read,
+      no
+      write). A verified token spends only its own allowance; a failure spends only
+      its source's, up to a limit, after which failures are answered 429 with no
+      write; a failure is a read-trail row only when it names a token that exists,
+      at most five per token id and source per window; a flood of unknown tokens
+      leaves one aggregated `agent.failures` line per source per window. The source
+      is the socket peer, or the address the proxy reported when `TRUSTED_PROXY_CIDR`
+      is set and the peer is inside it, never a header a client chooses.
     - Proxy. `proxy/Caddyfile` has a handle, above the sign-on one, that forwards
-      only the three GET routes, strips every identity header a client sends (the
-      canonical set and each provider's) and sets none, and answers anything else
-      under the prefix with a 404. A request that slips through to a route that
-      needs an identity arrives with none and gets a 401.
+      only the three GET routes, deletes sixteen identity header names it knows
+      and
+      sets none (the API reads no identity header on these routes, so the list is
+      defense in depth and is fixed), and answers anything else under the prefix
+      with
+      a 404. A request that slips through to a route that needs an identity arrives
+      with none and gets a 401. Caddy's log and uvicorn's access log drop the query
+      string of an agent route, so a token sent in a URL anyway is refused and not
+      written down by this stack.
     - Operator. `scripts/agent_tokens.py` and `make agent-tokens` list and
       revoke, as
       the database owner, the way `make dispose` works.
@@ -2853,22 +2902,27 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
       overdue. The dashboard's flag looks at the status and the viewer's local date.
     - (g) The per-token limit is 60 a minute (`AGENT_RATE_LIMIT_MAX_REQUESTS`);
       a
-      token that cannot be read is limited by source address. A 429 is a security
-      event, once per client per window, and is not a read-trail row (a flood of
-      refusals must not become a flood of rows).
-    - (h) A refused call is a read-trail row (`agent_refused`) naming the person
-      only
-      when the secret matched (an expired or revoked token), else `unknown`; the
-      reason is in the row and never in the response.
+      source may fail 30 times a window (`AGENT_FAILURE_RATE_LIMIT_MAX_REQUESTS`).
+      A 429 is not a read-trail row (a flood of refusals must not become a flood
+      of
+      rows); a source's failures are one aggregated security-log line a window.
+    - (h) A refusal is a read-trail row (`agent_refused`) only for a token that
+      exists, naming the person only when the secret matched (an expired or revoked
+      token) and `unknown` for a wrong secret; the reason is in the row and
+      never in
+      the response. A project a valid token cannot see is also a row (`not_visible`).
     - (i) An emergency-access identity may mint a token, and the token carries no
       emergency rights.
     - (j) Tokens are not purged on a schedule: a row stays, expired, until its
       principal is erased. After `make restore`, revoke everyone's.
-    - (k) The values an agent may be given are a closed vocabulary kept equal to
-      the
-      framework definitions by a test, plus `AGENT_EXTRA_VALUES`, so a custom
-      framework's words are null until listed.
+    - (k) The words an agent may be given come from the build's manifest (see
+      Allowlist), so a build whose manifest has none shows an agent no item or
+      checkpoint, and a record of a framework the build does not carry shows only
+      its references and people.
     - (l) A person mints through the API for now (the dashboard page is PR 2).
+    - (m) Project references only in v1; names are a later opt-in (see Opaque ids).
+    - (n) The replication caveat: the limiters are in process, so behind N replicas
+      each ceiling is N times its setting.
 - **Cost, stated.** A path of the API is reachable without single sign-on, so the
   token is the only thing between a caller and the data on it; a front door that
   authenticates every path cannot offer the agent API at all. The docs say where

@@ -215,7 +215,7 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
 
 - **Claim:** Requests are counted per identity over a sliding window. The limit
   is per replica.
-- **Asserted in:** `server/app/main.py` — "Per-key request accounting over a
+- **Asserted in:** `server/app/ratelimit.py` — "Per-key request accounting over a
   moving window."
 - **Status:** enforced
 - **Enforced by:**
@@ -1430,14 +1430,14 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
 - **Claim:** A bearer token authenticates a request only under `/api/agent/`. On
   every other route it is not read: with no identity header the request is a 401,
   and beside an identity header the session answers and the token is ignored. Only
-  the agent module and the rate limiter read the `Authorization` header.
+  the agent module reads the `Authorization` header.
 - **Asserted in:** `docs/agent-api.md` — "It is accepted under `/api/agent/` and on no other route. On every other route it is not read at all."
 - **Asserted in:** `docs/deploy.md` — "It is not a way to sign in: no other route accepts it."
 - **Status:** enforced
 - **Enforced by:**
   `server/tests/test_agent_api.py::test_a_bearer_alone_authenticates_nobody_on_any_other_route`
   `server/tests/test_agent_api.py::test_the_session_identity_never_reads_a_bearer`
-  `server/tests/test_agent_api.py::test_only_the_agent_module_and_the_limiter_read_a_bearer_header`
+  `server/tests/test_agent_api.py::test_only_the_agent_module_reads_a_bearer_header`
   `server/tests/test_agent_api.py::test_the_agent_prefix_is_exactly_the_agent_routes`
   `server/tests/test_agent_mutations.py::test_each_guard_is_noticed_when_broken`
 
@@ -1464,15 +1464,16 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
 - **Enforced by:**
   `server/tests/test_agent_api.py::test_every_bad_token_gets_the_same_401`
   `server/tests/test_agent_api.py::test_a_token_works_until_the_eighth_hour_and_not_after`
-  `server/tests/test_agent_api.py::test_refused_calls_are_recorded_and_say_why_to_the_operator_only`
+  `server/tests/test_agent_api.py::test_only_a_token_that_exists_leaves_a_trail_row_when_refused`
   `tests/test_stack.py::a token that is wrong is the uniform 401`
 
 ### C-100 The identity header means nothing on an agent route
 
-- **Claim:** The identity header a front door sets is ignored on the agent
-  routes, and the proxy strips every identity header a client sends there and sets
-  none, so a client cannot choose who it is by sending one.
-- **Asserted in:** `docs/agent-api.md` — "The front door's header is ignored there, and the proxy strips it, so a client cannot choose who it is by sending one."
+- **Claim:** The API reads no identity header on the agent routes, whatever its
+  name, so a client cannot choose who it is by sending one. As defense in depth the
+  proxy deletes sixteen identity header names it knows and sets none; that list is
+  fixed, and a header with another name reaches the API and is ignored there.
+- **Asserted in:** `docs/agent-api.md` — "The API does not read any identity header there, whatever its name, so a client cannot choose who it is by sending one."
 - **Asserted in:** `proxy/Caddyfile` — "It is safe because of what this block does NOT do: it never sets an identity"
 - **Status:** enforced
 - **Enforced by:**
@@ -1487,8 +1488,8 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
   three agent GET routes and answers any other method or path under
   `/api/agent/` with a 404 itself. Every other route is as it was: a request with
   no signed-in identity is refused, whatever it carries.
-- **Asserted in:** `docs/agent-api.md` — "forwards exactly the three agent `GET` routes, strips every identity header a client sends on them and sets none"
-- **Asserted in:** `docs/self-hosting.md` — "deletes every identity header a client sends on them and sets none"
+- **Asserted in:** `docs/agent-api.md` — "forwards exactly the three agent `GET` routes, deletes sixteen known identity header names on them as defense in depth and sets none"
+- **Asserted in:** `docs/self-hosting.md` — "deletes the identity header names it knows (a fixed list of sixteen) as defense in depth and sets none"
 - **Status:** enforced
 - **Enforced by:**
   `tests/test_proxy_identity.py::is refused by the proxy`
@@ -1514,35 +1515,40 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
 
 ### C-103 No name, email or free text reaches an agent
 
-- **Claim:** An agent response is built from an allowlist of stored keys, each
-  shape-checked, never copied from the stored record: no name, no email, no note,
-  rationale, evidence title or committee name, and no computed phase, flag, score
-  or verdict. A status or decision that is not a known word is shown as null, and
-  an item or checkpoint id only if it looks like an id.
-- **Asserted in:** `docs/agent-api.md` — "No name and no email appears in any response."
+- **Claim:** An agent response is built from an allowlist of stored keys, never
+  copied from the stored record: no name, no email, no note, rationale, evidence
+  title, committee name or project name, and no computed phase, flag, score or
+  verdict. A key a writer chose (an item, checkpoint or supplement id) and a
+  status or decision are returned only if they are words of the build's framework
+  definitions (see C-113); a person and a project are opaque ids.
+- **Asserted in:** `docs/agent-api.md` — "No name and no email appears in any response, and a project is a reference, not its name."
 - **Asserted in:** `docs/agent-api.md` — "Each response is built field by field from an allowlist of stored keys."
+- **Asserted in:** `docs/privacy.md` — "No name, no email and no free text is returned"
 - **Status:** enforced
 - **Enforced by:**
   `server/tests/test_agent_api.py::test_nothing_hostile_planted_anywhere_reaches_an_agent`
   `server/tests/test_agent_api.py::test_the_response_models_are_closed_allowlists`
-  `server/tests/test_agent_api.py::test_the_vocabulary_covers_every_framework_definition`
-  `server/tests/test_agent_api.py::test_a_deployments_own_values_pass_and_nothing_else_does`
+  `server/tests/test_agent_api.py::test_the_vocabulary_is_the_framework_definitions`
+  `server/tests/test_agent_api.py::test_a_builds_own_words_pass_and_the_published_ones_do_not_cross_over`
   `server/tests/test_agent_docs.py::test_the_documented_response_fields_are_the_models_exactly`
   `server/tests/test_agent_mutations.py::test_each_guard_is_noticed_when_broken`
 
 ### C-104 People are opaque ids
 
-- **Claim:** A person is shown to an agent only as a keyed pseudonym
-  (HMAC-SHA256 under `AGENT_ID_SECRET`): the same person is the same id in every
-  call of a deployment, another deployment's key gives other ids, and the id is
-  not the identity or a bare hash of it.
-- **Asserted in:** `docs/agent-api.md` — "People as **opaque ids** (`u_` and 32 hex characters)."
+- **Claim:** A person and a project are shown to an agent only as keyed
+  pseudonyms (HMAC-SHA256 under `AGENT_ID_SECRET`, a different domain prefix for
+  each): the same one is the same id in every call of a deployment, another
+  deployment's key gives other ids, and the id is not the identity or a bare hash
+  of it. A project is found by its reference among what the person's dashboard
+  shows, and an unknown, an invisible and an archived one are one 404.
+- **Asserted in:** `docs/agent-api.md` — "People and projects as **opaque ids** (`u_` and `pr_`, then 32 hex characters)."
 - **Status:** enforced
 - **Enforced by:**
   `server/tests/test_agent_api.py::test_opaque_ids_are_stable_keyed_and_not_the_identity_or_its_hash`
   `server/tests/test_agent_api.py::test_the_same_person_is_the_same_id_across_calls_and_projects`
   `server/tests/test_agent_api.py::test_a_different_deployments_secret_gives_different_ids`
   `server/tests/test_agent_api.py::test_a_short_secret_stops_the_server_starting`
+  `server/tests/test_agent_api.py::test_a_project_ref_is_stable_keyed_and_resolves_only_what_is_visible`
 
 ### C-105 A token lasts exactly 8 hours and is stored only as a hash
 
@@ -1607,14 +1613,15 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
 
 - **Claim:** An answered call writes a row to `access_event`, in the same
   transaction as the answer, marked `via = 'agent'` with the token's public id and
-  never its secret, and a refused call writes one with the reason. The same fact
-  goes to the security log without the secret.
-- **Asserted in:** `docs/agent-api.md` — "Every call, answered or refused, writes one row to the read trail (`access_event`)"
+  never its secret. A refusal of a token that exists, or of a project the person
+  cannot see, writes one with the reason. A malformed or unknown token, and a call
+  turned away by a rate limit, write no row and are counted in the security log.
+- **Asserted in:** `docs/agent-api.md` — "Not every call is a row, because the read trail is append-only and an unauthenticated caller must not be able to grow it"
 - **Status:** enforced
 - **Enforced by:**
   `server/tests/test_agent_api.py::test_every_agent_call_is_in_the_read_trail_marked_as_agent_access`
   `server/tests/test_agent_api.py::test_the_portfolio_entry_lists_the_ids_that_were_returned`
-  `server/tests/test_agent_api.py::test_refused_calls_are_recorded_and_say_why_to_the_operator_only`
+  `server/tests/test_agent_api.py::test_only_a_token_that_exists_leaves_a_trail_row_when_refused`
   `server/tests/test_agent_api.py::test_agent_calls_also_reach_the_security_log_without_the_secret`
   `server/tests/test_access_audit.py::test_the_check_constraint_and_the_enum_agree`
   `tests/test_stack.py::each call is in the real read trail, marked as agent access`
@@ -1622,14 +1629,16 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
 
 ### C-110 An agent token has its own, lower rate limit
 
-- **Claim:** Each token is limited separately and lower than a session is, a flood
-  of unreadable tokens is limited by source and never by a header a client can
-  rotate, and one agent cannot spend another's allowance.
-- **Asserted in:** `docs/agent-api.md` — "Each token may make 60 calls per 60 seconds (`AGENT_RATE_LIMIT_MAX_REQUESTS`), lower than the limit a person at the dashboard has (240)."
+- **Claim:** Each token is limited separately and lower than a session is, and
+  only a call whose token verified spends it, so nobody can spend another token's
+  allowance by naming it. A failed call is counted against its source, which is the
+  socket peer (or the proxy-reported address only inside `TRUSTED_PROXY_CIDR`),
+  never a header a client can rotate.
+- **Asserted in:** `docs/agent-api.md` — "A working token** may make 60 calls per 60 seconds (`AGENT_RATE_LIMIT_MAX_REQUESTS`), lower than the limit a person at the dashboard has (240)."
 - **Status:** enforced
 - **Enforced by:**
   `server/tests/test_agent_api.py::test_an_agent_token_has_its_own_lower_limit`
-  `server/tests/test_agent_api.py::test_a_flood_of_bad_tokens_is_limited_by_source_and_never_by_the_header`
+  `server/tests/test_agent_api.py::test_the_source_is_the_peer_and_not_a_header_a_client_chooses`
   `server/tests/test_agent_api.py::test_the_default_agent_limit_is_lower_than_the_default_session_limit`
   `server/tests/test_agent_mutations.py::test_each_guard_is_noticed_when_broken`
 
@@ -1644,3 +1653,79 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
   `tests/test_proxy_identity.py::is refused by the proxy`
   `tests/test_stack.py::a write verb on the agent route is refused by the proxy`
   `server/tests/test_agent_mutations.py::test_each_guard_is_noticed_when_broken`
+
+### C-112 A flood of wrong tokens cannot grow the trail or lock out a working one
+
+- **Claim:** The token is checked before anything is limited. A bad token writes no
+  read-trail row unless it names a token that exists, and then at most five per
+  token id and source per window; a source that fails too often is answered 429 with
+  nothing written; a working token is never counted against its source and so never
+  refused because of the address it came from.
+- **Asserted in:** `docs/agent-api.md` — "A token that works is never counted against its source and never refused for it"
+- **Status:** enforced
+- **Enforced by:**
+  `server/tests/test_agent_api.py::test_a_flood_of_bad_tokens_writes_nothing_and_never_blocks_a_real_token`
+  `server/tests/test_agent_api.py::test_nobody_can_spend_another_tokens_allowance_by_naming_it`
+  `server/tests/test_agent_api.py::test_the_per_token_limit_counts_only_requests_that_verified`
+  `server/tests/test_agent_mutations.py::test_each_guard_is_noticed_when_broken`
+
+### C-113 A key a writer chose reaches an agent only if the build's definitions have it
+
+- **Claim:** An item id, a checkpoint id, a supplement id, a status and a decision
+  are returned only if they are words of the framework definitions the server's
+  build carries, for the framework the record follows; a project's own id is never
+  returned. A writer's sentence in any key position does not reach an agent.
+- **Asserted in:** `docs/agent-api.md` — "A key a writer chose (an item id, a checkpoint id, a supplement id) is returned only if it is a word of the framework definitions the server was built with"
+- **Status:** enforced
+- **Enforced by:**
+  `server/tests/test_agent_api.py::test_a_key_a_writer_chose_never_reaches_an_agent`
+  `server/tests/test_agent_api.py::test_a_builds_own_words_pass_and_the_published_ones_do_not_cross_over`
+  `server/tests/test_agent_api.py::test_with_no_vocabulary_loaded_an_agent_is_shown_no_framework_words`
+  `server/tests/test_agent_api.py::test_the_vocabulary_is_the_framework_definitions`
+  `server/tests/test_agent_vocabulary.py::test_loading_replaces_the_table_wholesale`
+  `server/tests/test_agent_vocabulary.py::test_the_migrate_job_loads_the_words_from_the_manifest`
+  `server/tests/test_agent_vocabulary.py::test_the_server_reads_the_words_strictly`
+  `server/tests/test_agent_mutations.py::test_each_guard_is_noticed_when_broken`
+
+### C-114 The token is read from one header, and not logged
+
+- **Claim:** The token is read from the Authorization header and nowhere else: a
+  token in a query parameter, a cookie or another header is refused. This
+  server's access log and the proxy's keep the query string of an agent route out,
+  so a token sent in a URL anyway is not written there.
+- **Asserted in:** `docs/agent-api.md` — "The token is read from the `Authorization` header and nowhere else"
+- **Asserted in:** `docs/agent-api.md` — "this server and the proxy in this repository keep the query string of an agent route out of their logs"
+- **Status:** partial
+- **Enforced by:**
+  `server/tests/test_agent_api.py::test_the_token_comes_from_the_authorization_header_and_nowhere_else`
+  `server/tests/test_agent_api.py::test_a_token_sent_in_a_url_is_refused_and_not_logged_by_the_server`
+  `server/tests/test_agent_api.py::test_the_access_log_does_not_keep_a_query_on_an_agent_route`
+  `tests/test_proxy_identity.py::the proxy's log keeps no query string of an agent route`
+  `tests/test_proxy_agent_mutations.py`
+- **Gap:** A front door, load balancer or client in front of this stack may log a URL
+  (#164); the page says never to send a token in one.
+
+### C-115 A client cannot choose the address it is limited by
+
+- **Claim:** The source of a failed agent call is the socket peer, or the address
+  the proxy reported when `TRUSTED_PROXY_CIDR` is set and the peer is inside it.
+  A client that reaches the API directly and sends its own `X-Real-IP` or
+  `X-Forwarded-For` is still one source.
+- **Asserted in:** `docs/agent-api.md` — "The source** is the socket peer."
+- **Status:** enforced
+- **Enforced by:**
+  `server/tests/test_agent_api.py::test_the_source_is_the_peer_and_not_a_header_a_client_chooses`
+  `server/tests/test_agent_api.py::test_the_proxys_address_is_believed_only_inside_the_trusted_range`
+  `server/tests/test_agent_api.py::test_behind_a_trusted_proxy_each_client_is_its_own_source`
+  `server/tests/test_agent_mutations.py::test_each_guard_is_noticed_when_broken`
+
+### C-116 A weak secret for the opaque ids is refused at startup
+
+- **Claim:** The server refuses to start on an `AGENT_ID_SECRET` shorter than 32
+  characters, with fewer than 10 different ones, or made of one short pattern
+  repeated, and the generator the docs give always passes.
+- **Asserted in:** `docs/agent-api.md` — "The server refuses to start on one shorter than 32 characters"
+- **Status:** enforced
+- **Enforced by:**
+  `server/tests/test_agent_api.py::test_a_weak_secret_stops_the_server_starting`
+  `server/tests/test_agent_api.py::test_a_short_secret_stops_the_server_starting`

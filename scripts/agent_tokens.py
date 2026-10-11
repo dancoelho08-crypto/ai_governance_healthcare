@@ -82,11 +82,17 @@ SELECT coalesce(json_agg(ended ORDER BY token_id), '[]'::json)::text FROM ended;
 
 
 def where_of(args: argparse.Namespace) -> str:
+    """The WHERE clause for what the command named. A selector that was given is
+    always applied, even an empty one is refused rather than read as "no selector":
+    `revoke --user ''` must never mean everyone."""
     clauses = ["true"]
-    if getattr(args, "user", None):
-        clauses.append(f"principal_id = {quote(args.user.strip())}")
-    if getattr(args, "token", None):
-        clauses.append(f"token_id = {quote(args.token)}")
+    for name, column in (("user", "principal_id"), ("token", "token_id")):
+        value = getattr(args, name, None)
+        if value is None:
+            continue
+        if not value.strip():
+            raise ValueError(f"--{name} is empty: name a {name}, or use --everyone")
+        clauses.append(f"{column} = {quote(value.strip())}")
     return " AND ".join(clauses)
 
 
@@ -137,8 +143,13 @@ def main(argv: list[str] | None = None) -> int:
         "--everyone", action="store_true", help="every live token of everyone"
     )
     args = top.parse_args(argv)
-    if getattr(args, "token", None) and not TOKEN_ID.fullmatch(args.token):
+    if getattr(args, "token", None) is not None and not TOKEN_ID.fullmatch(args.token):
         print("agent_tokens: a token id is 16 hex characters", file=sys.stderr)
+        return 2
+    try:
+        where_of(args)  # refuses an empty selector before anything is run
+    except ValueError as exc:
+        print(f"agent_tokens: {exc}", file=sys.stderr)
         return 2
     psql = args.psql or default_psql()
     try:

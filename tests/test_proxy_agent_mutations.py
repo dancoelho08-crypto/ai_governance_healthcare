@@ -46,6 +46,11 @@ AFTER_SECRET = (
 )
 MUTATIONS: list[tuple[str, str, str]] = [
     (
+        "the log keeps a query string on the agent routes",
+        "(?i)^(/api/agent/[^?]*)",
+        "(?i)^(/api/nothing/[^?]*)",
+    ),
+    (
         "a write verb is forwarded",
         "		method GET\n		path /api/agent/me",
         "		method GET POST DELETE\n		path /api/agent/me",

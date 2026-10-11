@@ -41,6 +41,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .access import access_of, readable_rows
 from .accessaudit import AccessAction, AccessVia, record_access
+from .agent_limits import AgentGuard
 from .agent_tokens import (
     LABEL_MAX_LENGTH,
     AgentCaller,
@@ -52,13 +53,14 @@ from .agent_tokens import (
     mint,
     opaque_id,
     parse_bearer,
+    project_ref,
     revoke,
 )
-from .auth import Identity, check_network_locks
+from .auth import Identity, check_network_locks, client_address
 from .config import AGENT_VALUE_SHAPE, Settings
 from .db import Database
 from .principals import NOT_PEOPLE
-from .retirement import record_framework
+from .retirement import FrameworkRole, record_framework
 from .routes import get_db, get_identity, get_settings
 from .securitylog import SecurityEvent, emit
 
@@ -79,42 +81,6 @@ def is_agent_path(path: str) -> bool:
     """Is this a path the bearer routes serve? Exactly the ``/api/agent/`` prefix:
     ``/api/agent-tokens`` is a different route, answered to a session."""
     return path.startswith(AGENT_PREFIX)
-
-
-class ItemStatus(StrEnum):
-    """Every status value the published and example frameworks' definitions use. A
-    stored status outside this set (and outside ``AGENT_EXTRA_VALUES``) is shown as
-    null. A test keeps it equal to the definitions."""
-
-    MET = "met"
-    PARTIAL = "partial"
-    NOTMET = "notmet"
-    NA = "na"
-    DECLINED = "declined"  # OPTICA
-    DONE = "done"  # the example framework
-    STARTED = "started"
-    TODO = "todo"
-    SKIP = "skip"
-
-
-class GateDecision(StrEnum):
-    """Every checkpoint option of the published and example frameworks, as stored."""
-
-    PROCEED = "Proceed"
-    PROCEED_WITH_CONDITIONS = "Proceed with conditions"
-    REVISE_AND_RESUBMIT = "Revise and resubmit"
-    STOP = "Stop"
-    CONTINUE = "Continue"
-    CONTINUE_WITH_CHANGES = "Continue with changes"
-    RETRAIN_OR_REVISE = "Retrain or revise"
-    RETIRE = "Retire"
-    APPROVE = "Approve"  # the example framework
-    APPROVE_WITH_CONDITIONS = "Approve with conditions"
-    NOT_YET = "Not yet"
-    REJECT = "Reject"
-    KEEP = "Keep"
-    KEEP_WITH_CHANGES = "Keep with changes"
-    FIX_FIRST = "Fix first"
 
 
 class TokenState(StrEnum):
@@ -142,7 +108,9 @@ class AgentMeOut(_Out):
 class AgentItem(_Out):
     """One answered item, as stored. No notes, owner text or evidence."""
 
-    id: str = Field(description="The item's id in its framework's definition.")
+    id: str = Field(
+        description="The item's id, returned only if its framework's definition has it."
+    )
     status: str | None = Field(
         description="The stored status; null when none, or not a known value."
     )
@@ -159,7 +127,9 @@ class AgentItem(_Out):
 class AgentGate(_Out):
     """One checkpoint, as stored. No rationale and no committee name."""
 
-    id: str = Field(description="The checkpoint's id in the framework's definition.")
+    id: str = Field(
+        description="The checkpoint's id, returned only if its definition has it."
+    )
     decision: str | None = Field(description="The stored decision; null when none.")
     decided_on: date | None = Field(description="The stored decision date.")
     signed_by: str | None = Field(
@@ -190,9 +160,18 @@ class AgentPeople(_Out):
 
 
 class AgentProject(_Out):
-    id: str
+    ref: str = Field(
+        description=(
+            "An opaque reference to the project (pr_ and 32 hex characters), stable in "
+            "a deployment. The project's own id is chosen by whoever made it, so it "
+            "is never returned."
+        )
+    )
     framework: str | None = Field(
-        description="The framework the record follows: its stamp, or 'chai'."
+        description=(
+            "The framework the record follows: its stamp, or 'chai'. Null when it is "
+            "not a framework of this build."
+        )
     )
     updated_at: datetime
     updated_by: str | None = Field(description="Opaque id of the last editor.")
@@ -222,23 +201,65 @@ class AgentPortfolioOut(_Out):
 _KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 _DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _OPAQUE = re.compile(r"^u_[0-9a-f]{32}$")
-_NOT_ITEMS = frozenset({"meta", "items", "gates", "metrics", "card", "access"})
+_REF = re.compile(r"^pr_[0-9a-f]{32}$")
+
+
+class VocabKind(StrEnum):
+    """The kinds of word ``agent_vocabulary`` holds (014); the CHECK lists the same."""
+
+    FRAMEWORK = "framework"
+    ITEMS = "items"
+    GATES = "gates"
+    STATUSES = "statuses"
+    DECISIONS = "decisions"
 
 
 class Vocabulary:
-    """The status and decision words an agent may be told, as the framework
-    definitions use them (``ItemStatus``, ``GateDecision``) plus the deployment's own
-    (``AGENT_EXTRA_VALUES``). A stored value outside it is not passed on."""
+    """The words of the deployed build's framework definitions, loaded from
+    ``agent_vocabulary``. An item id, checkpoint id, supplement id, status or
+    decision is returned to an agent only if it is one of them, for the framework it
+    belongs to. Anything else a record stores under those keys is whatever a writer
+    typed, and is dropped, not shaped: no pattern can tell a name from an id, a list
+    of the ids can (D-89). Empty, so nothing is returned, when no manifest was loaded.
+    """
 
-    def __init__(self, extra: frozenset[str] = frozenset()) -> None:
-        self.statuses = frozenset(s.value for s in ItemStatus) | extra
-        self.decisions = frozenset(d.value for d in GateDecision) | extra
+    def __init__(self, rows: list[tuple[str, str, str]] | None = None) -> None:
+        self._words: dict[tuple[str, str], set[str]] = {}
+        for framework_id, kind, value in rows or []:
+            self._words.setdefault((framework_id, kind), set()).add(value)
 
-    def status(self, value: Any) -> str | None:
-        return value if isinstance(value, str) and value in self.statuses else None
+    @classmethod
+    async def load(cls, conn: asyncpg.Connection) -> Vocabulary:
+        rows = await conn.fetch(
+            "SELECT framework_id, kind, value FROM agent_vocabulary"
+        )
+        return cls([(r["framework_id"], r["kind"], r["value"]) for r in rows])
 
-    def decision(self, value: Any) -> str | None:
-        return value if isinstance(value, str) and value in self.decisions else None
+    def role(self, framework_id: Any) -> FrameworkRole | None:
+        """A framework's role in the build, or None if the build has no such one."""
+        if not isinstance(framework_id, str):
+            return None
+        roles = self._words.get((framework_id, VocabKind.FRAMEWORK.value))
+        return FrameworkRole(next(iter(roles))) if roles else None
+
+    def _has(self, framework_id: str | None, kind: VocabKind, word: Any) -> bool:
+        return (
+            framework_id is not None
+            and isinstance(word, str)
+            and word in self._words.get((framework_id, kind.value), ())
+        )
+
+    def item(self, framework_id: str | None, key: Any) -> bool:
+        return self._has(framework_id, VocabKind.ITEMS, key)
+
+    def gate(self, framework_id: str | None, key: Any) -> bool:
+        return self._has(framework_id, VocabKind.GATES, key)
+
+    def status(self, framework_id: str | None, value: Any) -> str | None:
+        return value if self._has(framework_id, VocabKind.STATUSES, value) else None
+
+    def decision(self, framework_id: str | None, value: Any) -> str | None:
+        return value if self._has(framework_id, VocabKind.DECISIONS, value) else None
 
 
 def _day(value: Any) -> date | None:
@@ -261,16 +282,16 @@ def _instant(value: Any) -> datetime | None:
 
 
 def _items(
-    answers: Any, vocab: Vocabulary, today: date
+    answers: Any, vocab: Vocabulary, framework_id: str | None, today: date
 ) -> tuple[list[AgentItem], bool]:
     if not isinstance(answers, dict):
         return [], False
     found: list[AgentItem] = []
-    for key in sorted(k for k in answers if isinstance(k, str) and _KEY.fullmatch(k)):
+    for key in sorted(k for k in answers if vocab.item(framework_id, k)):
         answer = answers[key]
         if not isinstance(answer, dict):
             continue
-        status = vocab.status(answer.get("status"))
+        status = vocab.status(framework_id, answer.get("status"))
         due = _day(answer.get("due"))
         if status is None and due is None:
             continue
@@ -286,16 +307,19 @@ def _items(
 
 
 def _gates(
-    gates: Any, vocab: Vocabulary, person: Callable[[Any], str | None]
+    gates: Any,
+    vocab: Vocabulary,
+    framework_id: str | None,
+    person: Callable[[Any], str | None],
 ) -> list[AgentGate]:
     if not isinstance(gates, dict):
         return []
     found: list[AgentGate] = []
-    for key in sorted(k for k in gates if isinstance(k, str) and _KEY.fullmatch(k)):
+    for key in sorted(k for k in gates if vocab.gate(framework_id, k)):
         gate = gates[key]
         if not isinstance(gate, dict):
             continue
-        decision = vocab.decision(gate.get("decision"))
+        decision = vocab.decision(framework_id, gate.get("decision"))
         decided_on = _day(gate.get("date"))
         signed_by = person(gate.get("signedBy"))
         signed_at = _instant(gate.get("signedAt"))
@@ -337,30 +361,29 @@ def build_project(
         readers=opaque_list(access["readers"]),
         truncated=any(len(v) > MAX_PEOPLE_PER_ROLE for v in access.values()),
     )
-    items, truncated = _items(doc.get("items"), vocab, today)
+    primary = record_framework(doc)
+    framework = primary if vocab.role(primary) is FrameworkRole.PRIMARY else None
+    items, truncated = _items(doc.get("items"), vocab, framework, today)
     supplements: list[AgentSupplement] = []
-    for key in sorted(k for k in doc if isinstance(k, str)):
+    for key in sorted(k for k in doc if vocab.role(k) is FrameworkRole.SUPPLEMENT):
         value = doc[key]
-        if key in _NOT_ITEMS or not _KEY.fullmatch(key) or not isinstance(value, dict):
+        if not isinstance(value, dict) or not isinstance(value.get("answers"), dict):
             continue
-        if not isinstance(value.get("answers"), dict):
-            continue
-        extra, _ = _items(value["answers"], vocab, today)
+        extra, _ = _items(value["answers"], vocab, key, today)
         supplements.append(
             AgentSupplement(
                 framework=key, enabled=value.get("enabled") is True, items=extra
             )
         )
-    framework = record_framework(doc)
     return AgentProject(
-        id=row["id"],
-        framework=framework if _KEY.fullmatch(framework) else None,
+        ref=project_ref(secret, row["id"]),
+        framework=framework,
         updated_at=row["updated_at"],
         updated_by=person(row["updated_by"]),
         people=people,
         items=items,
         items_truncated=truncated,
-        gates=_gates(doc.get("gates"), vocab, person),
+        gates=_gates(doc.get("gates"), vocab, framework, person),
         supplements=supplements,
         has_overdue=any(i.overdue for i in items)
         or any(i.overdue for s in supplements for i in s.items),
@@ -397,15 +420,19 @@ async def _record_refusal(
     presented: Presented,
     reason: Refusal,
     user_id: str | None,
-    project_id: str | None = None,
+    detail_extra: dict[str, Any] | None = None,
 ) -> None:
     """Write a refused call to the read trail and the security log. Never raises: a
-    trail that cannot be written must not turn a 401 into a 500 that says more."""
+    trail that cannot be written must not turn a 401 into a 500 that says more.
+
+    Called only for a token that exists (and so is attributable), after the guard has
+    allowed a row: see ``agent_limits``."""
     detail: dict[str, Any] = {
         "route": _route_of(request),
         "reason": reason.value,
         # A proxy that works strips this on the agent route; one that does not shows.
         "identity_header_ignored": _carries_identity_header(request),
+        **(detail_extra or {}),
     }
     try:
         async with db.acquire() as conn:
@@ -414,7 +441,6 @@ async def _record_refusal(
                 Identity(id=user_id or "unknown", name="", email=""),
                 AccessAction.AGENT_REFUSED,
                 request,
-                project_id=project_id,
                 detail=detail,
                 via=AccessVia.AGENT,
                 token_id=presented.token_id,
@@ -428,6 +454,14 @@ def _carries_identity_header(request: Request) -> bool:
     return bool((request.headers.get(settings.identity_header) or "").strip())
 
 
+def _too_many(window: int) -> HTTPException:
+    return HTTPException(
+        429,
+        "Too many requests; please retry shortly.",
+        headers={"Retry-After": str(window)},
+    )
+
+
 async def get_agent(
     request: Request,
     settings: Settings = Depends(get_settings),
@@ -437,22 +471,39 @@ async def get_agent(
 
     The identity header is not read here and is never consulted: a request carrying
     both is a bearer request, and the header is ignored. Nothing about the session
-    is trusted on this route.
+    is trusted on this route. The token is read from the Authorization header and
+    from nowhere else (not a query parameter, not a cookie).
+
+    The token is checked FIRST, and only then is anything limited
+    (``agent_limits``): a verified token spends its own allowance and nobody's
+    source address; a failure spends its source's, and writes a trail row only for a
+    token that exists, within a bound.
     """
     if not settings.agent_api_enabled:
         raise HTTPException(404, "Not Found")
     check_network_locks(request, settings)
+    guard: AgentGuard = request.app.state.agent_guard
     presented = parse_bearer(request.headers.get("authorization"))
     async with db.acquire() as conn:
         verified = await authenticate(conn, presented, now_of(request))
-    if verified.caller is None:
-        assert verified.refusal is not None
+    if verified.caller is not None:
+        if not await guard.allow_token(verified.caller.token_id):
+            raise _too_many(guard.window)
+        request.state.agent_presented = presented
+        return verified.caller
+    assert verified.refusal is not None
+    source = client_address(request, settings)
+    if not guard.charge_failure(source):
+        raise _too_many(guard.window)
+    if (
+        verified.known_id
+        and presented.token_id
+        and await guard.may_write_row(presented.token_id, source)
+    ):
         await _record_refusal(
             db, request, presented, verified.refusal, verified.user_id
         )
-        raise _unauthorized()
-    request.state.agent_presented = presented
-    return verified.caller
+    raise _unauthorized()
 
 
 def _as_identity(caller: AgentCaller) -> Identity:
@@ -471,12 +522,10 @@ async def _used(conn: asyncpg.Connection, caller: AgentCaller, now: datetime) ->
 
 agent_router = APIRouter(prefix="/api/agent", tags=["agent (read-only)"])
 
-ProjectIdPath = Path(
+RefPath = Path(
     ...,
-    min_length=1,
-    max_length=64,
-    pattern=r"^[A-Za-z0-9_.:-]+$",
-    description="Project id.",
+    pattern=_REF.pattern,
+    description="A project reference (pr_ and 32 hex characters), from the portfolio.",
 )
 
 _UNAUTHORIZED = {
@@ -582,19 +631,22 @@ async def agent_portfolio(
 ) -> AgentPortfolioOut:
     now = now_of(request)
     today = now.astimezone(UTC).date()
-    vocab = Vocabulary(settings.agent_extra_values)
     async with db.acquire() as conn, conn.transaction():
+        vocab = await Vocabulary.load(conn)
         rows = await readable_rows(conn, caller.user_id, enforced=True)
         built = [
-            build_project(
-                row, secret=settings.agent_id_secret, vocab=vocab, today=today
+            (
+                row,
+                build_project(
+                    row, secret=settings.agent_id_secret, vocab=vocab, today=today
+                ),
             )
             for row in rows
             if not (row["doc"] or {}).get("archived")
         ]
         matching = [
-            p
-            for p in built
+            (row, p)
+            for row, p in built
             if _matches(
                 p,
                 item_status=item_status,
@@ -606,7 +658,8 @@ async def agent_portfolio(
                 framework=framework,
             )
         ]
-        page = matching[offset : offset + limit]
+        page_rows = [row for row, _ in matching[offset : offset + limit]]
+        page = [p for _, p in matching[offset : offset + limit]]
         filters = {
             k: (v.isoformat() if isinstance(v, date) else v)
             for k, v in {
@@ -630,7 +683,7 @@ async def agent_portfolio(
                 "count": len(page),
                 "total": len(matching),
                 "offset": offset,
-                "projects": [p.id for p in page],
+                "projects": [r["id"] for r in page_rows],
                 "filters": filters,
             },
             via=AccessVia.AGENT,
@@ -677,7 +730,7 @@ def _matches(
 
 
 @agent_router.get(
-    "/projects/{project_id}",
+    "/projects/{ref}",
     response_model=AgentProject,
     responses={
         **_UNAUTHORIZED,
@@ -687,13 +740,13 @@ def _matches(
                 "agent API is not enabled."
             )
         },
-        422: {"description": "The project id is not valid."},
+        422: {"description": "The reference is not a reference."},
     },
-    summary="One project",
+    summary="One project, by the reference the portfolio gave",
 )
 async def agent_project(
     request: Request,
-    project_id: str = ProjectIdPath,
+    ref: str = RefPath,
     caller: AgentCaller = Depends(get_agent),
     settings: Settings = Depends(get_settings),
     db: Database = Depends(get_db),
@@ -701,14 +754,19 @@ async def agent_project(
     now = now_of(request)
     today = now.astimezone(UTC).date()
     found: AgentProject | None = None
+    project_id: str | None = None
     async with db.acquire() as conn, conn.transaction():
+        vocab = await Vocabulary.load(conn)
+        # A ref is resolved by looking at what this person's dashboard shows, and
+        # nothing else: no lookup by project id, so a ref for a project the person
+        # cannot open, one that is archived and one that does not exist are alike.
         for row in await readable_rows(conn, caller.user_id, enforced=True):
-            if row["id"] == project_id and not (row["doc"] or {}).get("archived"):
+            if (row["doc"] or {}).get("archived"):
+                continue
+            if project_ref(settings.agent_id_secret, row["id"]) == ref:
+                project_id = row["id"]
                 found = build_project(
-                    row,
-                    secret=settings.agent_id_secret,
-                    vocab=Vocabulary(settings.agent_extra_values),
-                    today=today,
+                    row, secret=settings.agent_id_secret, vocab=vocab, today=today
                 )
                 break
         if found is not None:
@@ -724,15 +782,15 @@ async def agent_project(
             )
             await _used(conn, caller, now)
     if found is None:
-        # Nothing was disclosed. One answer for a project that does not exist, one
-        # that is archived and one this user may not open.
+        # Nothing was disclosed. A call by a token that verified, so it is
+        # attributable and limited by that token's own allowance.
         await _record_refusal(
             db,
             request,
             request.state.agent_presented,
             Refusal.NOT_VISIBLE,
             caller.user_id,
-            project_id=project_id,
+            {"ref": ref},
         )
         raise HTTPException(404, "No such project")
     return found

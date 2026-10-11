@@ -64,6 +64,18 @@ def unit() -> None:
     check("so are two selectors", code == 2, out)
     code, out = run("--psql", "false", "revoke", "--token", "not-hex")
     check("a token id that is not 16 hex characters is refused", code == 2, out)
+    for args in (
+        ("revoke", "--user", ""),
+        ("revoke", "--user", "   "),
+        ("revoke", "--token", ""),
+        ("list", "--user", ""),
+    ):
+        code, out = run("--psql", "false", *args)
+        check(
+            f"{' '.join(args)!r} is refused, not read as everyone",
+            code == 2,
+            out,
+        )
     check(
         "an empty list is said in words",
         at.render_list([]) == "No agent tokens.",
@@ -202,6 +214,12 @@ def integration() -> None:
             "now() + interval '8 hours'), ('e000000000000002', repeat('7', 64), "
             "'ann@h.org', now(), now() + interval '8 hours')",
         )
+        # An empty selector must reach no row: the script refuses it before psql.
+        live_before = state()
+        for args in (("revoke", "--user", ""), ("revoke", "--user", " ")):
+            code, out = run("--psql", prefix, *args)
+            check(f"{' '.join(args)!r} revokes nothing", code == 2, out)
+        check("and changes no row", state() == live_before)
         code, out = run("--psql", prefix, "revoke", "--everyone")
         after = state()
         check(

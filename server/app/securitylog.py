@@ -74,6 +74,7 @@ class SecurityEvent(StrEnum):
     AGENT_TOKEN_MINTED = "agent_token.minted"
     AGENT_TOKEN_REVOKED = "agent_token.revoked"
     AGENT_REFUSED = "agent.refused"
+    AGENT_FAILURES = "agent.failures"
 
 
 _log = logging.getLogger(SECURITY_LOGGER)
@@ -124,6 +125,28 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(out, ensure_ascii=False, default=str)
 
 
+class RedactAgentQuery(logging.Filter):
+    """Keep a query string out of the access log of an agent route (#164).
+
+    uvicorn's access line carries the request target, query included. The agent routes
+    read their token from the Authorization header only, but a client that puts it in a
+    URL anyway (``?token=``) would have it written to the log, where it is a credential
+    that outlives the call. The route is refused either way; this makes the log honest
+    about not keeping what was sent. Other routes' lines are unchanged.
+    """
+
+    PREFIX = "/api/agent/"
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if isinstance(args, tuple) and len(args) >= 3 and isinstance(args[2], str):
+            target = args[2]
+            path, mark, _query = target.partition("?")
+            if mark and path.startswith(self.PREFIX):
+                record.args = (*args[:2], f"{path}?[redacted]", *args[3:])
+        return True
+
+
 def configure_logging(
     level: str = "info",
     fmt: LogFormat = LogFormat.JSON,
@@ -150,3 +173,6 @@ def configure_logging(
     root.addHandler(handler)
     root.setLevel(getattr(logging, level.upper(), logging.INFO))
     logging.getLogger(SECURITY_LOGGER).setLevel(logging.INFO)
+    access = logging.getLogger("uvicorn.access")
+    if not any(isinstance(f, RedactAgentQuery) for f in access.filters):
+        access.addFilter(RedactAgentQuery())

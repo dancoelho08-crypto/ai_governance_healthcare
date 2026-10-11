@@ -111,6 +111,9 @@ class FrameworkEntry:
     version: str
     sha256: str
     retire: frozenset[tuple[str, str]]
+    # What an agent may be shown of a record of this framework (D-89): kind -> words.
+    # Empty for a manifest from a build that predates it.
+    vocab: tuple[tuple[str, frozenset[str]], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -164,12 +167,40 @@ def _need(ok: bool, why: str) -> None:
         raise ManifestError(why)
 
 
-def _keys(obj: dict, required: set[str], where: str) -> None:
+def _keys(
+    obj: dict, required: set[str], where: str, optional: set[str] | None = None
+) -> None:
     _need(isinstance(obj, dict), f"{where} is not an object")
-    extra = set(obj) - required
+    extra = set(obj) - required - (optional or set())
     missing = required - set(obj)
     _need(not missing, f"{where} lacks {sorted(missing)}")
     _need(not extra, f"{where} has unknown keys {sorted(extra)}")
+
+
+VOCAB_KINDS = ("items", "gates", "statuses", "decisions")
+MAX_VOCAB_WORD = 200
+
+
+def _vocab(raw: Any, where: str) -> tuple[tuple[str, frozenset[str]], ...]:
+    """A framework's vocabulary, strictly: four lists of plain words, no more."""
+    if raw is None:
+        return ()
+    _keys(raw, set(VOCAB_KINDS), where)
+    out = []
+    for kind in VOCAB_KINDS:
+        words = raw[kind]
+        _need(isinstance(words, list), f"{where}.{kind} is not a list")
+        for word in words:
+            _need(
+                isinstance(word, str)
+                and bool(word.strip())
+                and len(word) <= MAX_VOCAB_WORD
+                and not _CONTROL.search(word),
+                f"{where}.{kind} holds {word!r}, which is not a word",
+            )
+        _need(len(set(words)) == len(words), f"{where}.{kind} lists a word twice")
+        out.append((kind, frozenset(words)))
+    return tuple(out)
 
 
 def _id(value: Any, where: str) -> str:
@@ -200,7 +231,7 @@ def parse_manifest(text: str) -> Manifest:
     entries: list[FrameworkEntry] = []
     for i, f in enumerate(raw["frameworks"]):
         where = f"frameworks[{i}]"
-        _keys(f, {"id", "role", "version", "sha256", "retire"}, where)
+        _keys(f, {"id", "role", "version", "sha256", "retire"}, where, {"vocab"})
         fid = _id(f["id"], f"{where}.id")
         try:
             role = FrameworkRole(f["role"])
@@ -233,7 +264,14 @@ def parse_manifest(text: str) -> Manifest:
         if role is FrameworkRole.SUPPLEMENT:
             _need(not pairs, f"{where} is a supplement and cannot end a project")
         entries.append(
-            FrameworkEntry(fid, role, f["version"], f["sha256"], frozenset(pairs))
+            FrameworkEntry(
+                fid,
+                role,
+                f["version"],
+                f["sha256"],
+                frozenset(pairs),
+                _vocab(f.get("vocab"), f"{where}.vocab"),
+            )
         )
     ids = [e.id for e in entries]
     _need(len(set(ids)) == len(ids), "a framework is listed twice")
@@ -593,6 +631,31 @@ def describe_sync(synced: SyncResult, manifest: Manifest) -> str:
             f"{counts}. Their records keep retiring by them."
         )
     return text
+
+
+async def sync_vocabulary(conn: asyncpg.Connection, manifest: Manifest) -> int:
+    """Make ``agent_vocabulary`` the manifest's, wholesale; return the rows written.
+
+    It decides only what an agent may be shown and nothing about disposal, so unlike
+    the retirement rules it needs no acknowledgment and keeps no history: a build
+    that lists fewer words simply shows agents fewer. A manifest with no vocabulary
+    empties it, and an agent is then shown no item, checkpoint or status (D-89).
+    """
+    rows = [(f.id, "framework", f.role.value) for f in manifest.frameworks] + [
+        (f.id, kind, word)
+        for f in manifest.frameworks
+        for kind, words in f.vocab
+        for word in sorted(words)
+    ]
+    async with conn.transaction():
+        await conn.execute("SELECT pg_advisory_xact_lock($1)", MIGRATION_LOCK_ID)
+        await conn.execute("DELETE FROM agent_vocabulary")
+        await conn.executemany(
+            "INSERT INTO agent_vocabulary (framework_id, kind, value) "
+            "VALUES ($1, $2, $3)",
+            rows,
+        )
+    return len(rows)
 
 
 async def sync_rules(

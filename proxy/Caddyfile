@@ -53,7 +53,16 @@
 {$SITE_ADDRESS:http://:80} {
 	log {
 		output stdout
-		format console
+		# Keep a query string out of the log on the agent routes (#164). The token is read
+		# from the Authorization header only (Caddy already redacts that header's value
+		# in its log), but a client that puts one in a URL anyway would have it written
+		# here. Only /api/agent/ URIs are touched; every other line is as it was.
+		format filter {
+			wrap console
+			fields {
+				request>uri regexp "(?i)^(/api/agent/[^?]*)\?.*$" "$1?[redacted]"
+			}
+		}
 	}
 
 	encode zstd gzip
