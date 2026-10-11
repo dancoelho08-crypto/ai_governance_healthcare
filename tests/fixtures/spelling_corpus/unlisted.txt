@@ -1,0 +1,10 @@
+# British spellings the checker does not find, a known limit (D-81): none is
+# found today. Lines starting with '# ' are comments.
+# The en_US dictionary accepts these as American spellings, so no rule may
+# match them (the dictionary test), though the verifier listed them as British.
+leucotomy
+leucotomies
+pharmacopoeia
+# Not listed, and of no British shape.
+paeony
+diaeresis
