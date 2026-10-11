@@ -1359,7 +1359,7 @@ honest answer and is a gap worth closing; see R-19.
 - The owner's decision, 2026-10-10, option c on #194: detect and remove, rather
   than escape in the export or refuse at entry.
 - Source: the owner's decision on #194; DECISIONS D-88; claim C-82 and the
-  sentences in `docs/guide.md` and `docs/exports.md` (C-97).
+  sentences in `docs/guide.md` and `docs/exports.md` (C-112).
 - Enforced by: `tests/test_address_credentials.py` (the function on a table of
   cases, against the URL parser and markdown-it's linkify, every free-text field,
   typing, the references, a new project, a hold reason, import, the history, the

@@ -2760,7 +2760,7 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
   clean and tell, which does not lose what the person typed and does not block
   them); hoisting a regex constant per field (the funnel is `edit()`); stripping
   `user:pass@host` with no scheme (false positives, no link to prevent).
-- Source: #194; the owner's decision on it; DECISIONS D-85; claims C-82, C-97.
+- Source: #194; the owner's decision on it; DECISIONS D-85; claims C-82, C-112.
 - Enforced by: `tests/test_address_credentials.py` (`pixi run
   test-address-credentials`, in CI's browser job) and `tests/test_markdown_render.py`
   (any credentialed link fails the audit; mutations of the backstop are rejected).

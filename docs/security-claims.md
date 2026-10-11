@@ -1078,7 +1078,7 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
   GFM renderer links a bare address a person typed, and a bare address with
   credentials (`https://user:pass@host/`) used to pass the audit; since #194 (D-88)
   the dashboard removes the credentials on entry and import and the export removes
-  them again, and the audit fails on any credentialed link (C-97). A claim about
+  them again, and the audit fails on any credentialed link (C-112). A claim about
   every renderer cannot be proven with one, so this stays partial.
 - **Enforced by:**
   `tests/test_markdown_render.py::every payload, sample and language renders as text in every configuration`
@@ -1427,7 +1427,7 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
   `tests/test_export_schema.py::an edit's history entry carries the fingerprint of what was stored`
   `tests/test_fingerprint_skip.py::all six places name the same fields`
 
-### C-97 Credentials are removed from addresses in text
+### C-112 Credentials are removed from addresses in text
 
 - **Claim:** A user name or password in an address a person types, pastes or
   imports, in any field, is removed and the person is told, the change history
