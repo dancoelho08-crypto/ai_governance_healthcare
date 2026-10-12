@@ -38,7 +38,7 @@ RUN printf '%s\n' \
  && go mod tidy \
  && CGO_ENABLED=0 go build -trimpath -ldflags "-w -s" -o /usr/bin/caddy .
 
-FROM caddy:2@sha256:8dc9fa87b36b25303d1c67d2a09f5824b7f3bfd72cb052f246e5da2133fe29a8
+FROM caddy:2@sha256:f2a1290d0463aad60660d4ec134943f183ee2a5f6c3eb7bf32dd984f2f020772
 
 COPY --from=caddy-build /usr/bin/caddy /usr/bin/caddy
 
