@@ -48,6 +48,7 @@ function renderMain(focusTop) {
 }
 
 function renderProject(focusTop) {
+  agentLeave();
   document.body.classList.remove("home");
   renderRail(); renderMain(focusTop); renderPanel();
   // A framework with no side panel has no button to open one.

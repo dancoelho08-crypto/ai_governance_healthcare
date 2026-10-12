@@ -3078,3 +3078,47 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
   cannot be done, and only the Caddyfile in this repository is tested for it.
 - Source: #164 and the owner's decisions of 2026-10-10; R-71; amends R-06 for the
   agent routes (D-03 stands for every other route).
+
+### D-90 The agent access page forgets its token whenever it is redrawn
+
+- Status: Accepted for the owner's decisions of 2026-10-10 on #164 (a user mints,
+  sees and revokes their own tokens); the choices below are Proposed, for the owner
+  to confirm
+- **The question.** PR 1 (D-89) built the token routes. PR 2 is the page that
+  uses them. How much of the token's life may the browser hold?
+- **Built.**
+    - Reached from a button on the portfolio ("Agent access"), drawn only in server
+      mode, and opening a page in the main area like the portfolio itself. It is
+      not a header or rail entry, so no other screen changes and the browser-only
+      copy and the custom builds show nothing new.
+    - The token is read from the mint response into one variable and shown as the
+      text of one element (R-72). It is dropped when the page is left by any route,
+      when the page is redrawn (a language change included) and when the page
+      closes. A language change therefore costs an uncopied token: the person
+      creates another, which is cheap and bounded (5 live, 8 hours).
+    - The list is read through an allowlist of public fields, and the token's
+      label and every word the server sends are set as text.
+    - A server that has the feature off answers 404 on the token routes (there is
+      no flag in `/api/health`); the page treats a 404 on the list or on a
+      mint as "off" and shows one explanation instead of a form. A 404 on a
+      revoke means the token is not the person's or is gone, and refreshes the
+      list.
+    - Any role may create a token (R-71), so the page is not gated on a read-only
+      project: that gate is per project and would hide the page from exactly the
+      readers an assistant is most likely to serve.
+    - The link to the agent API guide is the published documentation site, a plain
+      link the person follows, so the page itself fetches nothing from it.
+- **Rejected.**
+    - *Keeping the reveal across a language change* (re-render the panel in place):
+      it makes a re-render a code path that must not leak, and a missed case puts
+      the secret in a template string. Forgetting is the safer default.
+    - *Storing the token (even session-only) so it survives a reload*: the whole
+      point of 8 hours and "shown once" is that the server cannot show it
+      again, so nothing in the browser may either.
+    - *A header or rail entry*: it would change every screen of every build for
+      a page few people open.
+    - *Gating on read-only mode*: see above.
+    - *Writing to the clipboard on dismiss to clear it*: it overwrites what the
+      person may have copied for another reason, and cannot be relied on to work.
+- Carries out D-89 (l): the page that replaces minting from the console.
+- Source: #164 (PR 2 of 3); R-71, R-72; D-89.

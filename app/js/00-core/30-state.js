@@ -67,6 +67,7 @@ const ExportFormat = Object.freeze({
 const Act = Object.freeze({
   LOG_OLDER: "log-older",   // load a deeper page of the audit history
   UNLOCK: "unlock",         // leave the idle lock: reload, through the front door
+  AGENT_OPEN: "agent-open", // the agent access page (#164)
 });
 let STORE=null, MODE=Mode.CONNECTING, RO=false;
 const ME={id:null};

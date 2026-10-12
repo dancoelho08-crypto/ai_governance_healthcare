@@ -362,3 +362,33 @@ body.ro .ro-hide{display:none!important}
 .modal input{width:100%;margin-top:6px;padding:8px 10px;border:1px solid var(--rule);border-radius:6px;font:inherit;background:var(--paper);color:var(--ink)}
 .modal .btn.danger[disabled]{opacity:.45;cursor:not-allowed}
 @media print{.modal-backdrop{display:none!important}}
+
+/* agent access (#164): logical properties only, so Hebrew mirrors it */
+.agent-page{max-width:760px}
+.agent-card{background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:14px 18px;margin:0 0 16px}
+.agent-card h2{font-size:17px;margin:0 0 8px}
+.agent-card ul{margin:0 0 10px;padding-inline-start:20px}
+.agent-warn{border-inline-start:4px solid var(--amber);background:var(--amber-soft);padding:8px 12px;margin:10px 0;font-weight:600}
+.agent-err{color:var(--red);font-weight:600;margin:0 0 12px;overflow-wrap:anywhere}
+.agent-err:empty{display:none}
+.agent-form{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}
+.agent-form .field{flex:1 1 260px}
+.agent-form input{padding:8px 10px;border:1px solid var(--rule);border-radius:6px;background:var(--paper);color:var(--ink);width:100%}
+.agent-reveal{border:2px solid var(--amber);border-radius:8px;padding:12px 14px;margin-block-start:16px;background:var(--paper)}
+.agent-reveal h3{margin:0 0 6px;font-size:16px}
+.agent-secret{display:block;margin:10px 0;padding:10px 12px;background:var(--sunk);border-radius:6px;font:13px/1.4 ui-monospace,Consolas,monospace;overflow-wrap:anywhere;word-break:break-all;user-select:all;unicode-bidi:plaintext}
+.agent-reveal-actions{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-start}
+.agent-tokens{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+.agent-token{border:1px solid var(--rule);border-inline-start-width:5px;border-radius:6px;padding:10px 12px;display:grid;gap:6px}
+.agent-token.active{border-inline-start-color:var(--teal)}
+.agent-token.expired,.agent-token.revoked{border-inline-start-color:var(--muted);color:var(--muted)}
+.agent-token-head{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}
+.agent-token-label{overflow-wrap:anywhere}
+.agent-badge{font-size:12px;font-weight:700;padding:2px 8px;border-radius:4px}
+.agent-badge.active{background:var(--green-soft);color:var(--green)}
+.agent-badge.expired,.agent-badge.revoked{background:var(--sunk);color:var(--muted)}
+.agent-token-facts{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:2px 12px;margin:0;font-size:13px}
+.agent-token-facts dt{color:var(--muted)}
+.agent-token-facts dd{margin:0;overflow-wrap:anywhere}
+.agent-token .btn{justify-self:start}
+@media print{.agent-secret{display:none}}

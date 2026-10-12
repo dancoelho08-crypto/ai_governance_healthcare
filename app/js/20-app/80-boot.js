@@ -13,6 +13,7 @@ renderDashboardShell();
     rememberApiHere();
     STORE=new ApiStore("/api"); MODE=Mode.API;
     setModeFor(MODE);
+    renderDashboardShell();   // drawn before the mode was known: now with what only this mode offers (agent access)
     showScopeNotice();
     startSession(api.health);   // sign-out link and idle lock, as the server configured
     checkRetirementRules(api.health);   // does it retire records by this page's rules? (D-83)

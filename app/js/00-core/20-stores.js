@@ -53,7 +53,7 @@ const HoldAction = Object.freeze({ PLACE: "place", LIFT: "lift" });
    changed, project deleted). */
 const SaveOutcome = Object.freeze({ RETRY: "retry", REFUSED: "refused", DENIED: "denied", GONE: "gone" });
 const HttpStatus = Object.freeze({   // enum-ok: HTTP's own status numbers
-  UNAUTHORIZED: 401, FORBIDDEN: 403, NOT_FOUND: 404, TIMEOUT: 408, TOO_MANY: 429, CLIENT_MIN: 400, SERVER_MIN: 500,
+  UNAUTHORIZED: 401, FORBIDDEN: 403, NOT_FOUND: 404, TIMEOUT: 408, CONFLICT: 409, TOO_MANY: 429, CLIENT_MIN: 400, SERVER_MIN: 500,
 });
 function classifyStatus(status){
   if(status===HttpStatus.UNAUTHORIZED || status===HttpStatus.FORBIDDEN) return SaveOutcome.DENIED;

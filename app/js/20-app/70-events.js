@@ -80,6 +80,7 @@ document.addEventListener("click",async e=>{
   if(frameworkClick(btn)) return;
   const a=btn.dataset.act; if(!a) return;
   if(a===Act.UNLOCK){ location.reload(); return; }
+  if(a===Act.AGENT_OPEN){ openAgentPage(); return; }
   if(a==="new"){ const f=document.getElementById("newform"); if(f){ f.hidden=false; document.getElementById("newname").focus(); } return; }
   if(a==="new-cancel"){ document.getElementById("newform").hidden=true; return; }
   if(a==="samples"){

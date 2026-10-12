@@ -276,6 +276,17 @@ print dialog), Markdown, or the project's data as JSON. A report is written in t
 reader's language and says which. Every export says which storage mode produced
 it. See [Exports](exports.md).
 
+## Agent access
+
+On a shared workspace, **Agent access** (a button on the portfolio) lets you
+create a token for a program you run, such as an assistant that answers
+questions about your portfolio. The token is read-only, sees the projects you
+see (not archived ones) and the registered statuses, decisions and dates (no
+notes), and stops working after 8 hours. It is shown once, so copy it into a
+secret store, never a chat or a ticket. You can revoke it from the same page
+at any time. Not every server turns this on; the page says when it is off. See
+[The agent API](agent-api.md).
+
 ## Language and sign-out
 
 The language picker in the header switches between English, Spanish, French,

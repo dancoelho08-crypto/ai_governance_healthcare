@@ -28,6 +28,7 @@ function dashData(){
 const SearchField = Object.freeze({ QUERY: "q", ALL_TEXT: "qall" });
 const SEARCH_HINT = Object.freeze({ NAMES: "dash.searchNames", ALL_TEXT: "dash.searchAll" });
 function renderDashboardShell(){
+  agentLeave();   // the agent page's token never outlives the page (#164)
   document.body.classList.add("home");
   document.getElementById("projName").textContent = t("header.portfolio");
   const m=document.getElementById("main");
@@ -39,7 +40,7 @@ function renderDashboardShell(){
       <p class="lede">${esc(t(uiKey(UiSlot.DASH_LEDE),uiName()))}</p></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start">
         <button class="btn ro-hide" data-act="samples" title="${esc(t("dash.addSamplesTitle"))}">${esc(t("dash.addSamples"))}</button>
-        <button class="btn primary ro-hide" data-act="new">${esc(t("dash.newProject"))}</button>
+        <button class="btn primary ro-hide" data-act="new">${esc(t("dash.newProject"))}</button>${MODE===Mode.API?`<button class="btn" data-act="${esc(Act.AGENT_OPEN)}">${esc(t("agent.open"))}</button>`:""}
       </div>
     </div>
     ${legacy?`<div class="banner ro-hide" id="legacyBanner"><span>${tHtml("dash.legacy",{},{name:`<b>${esc(legacy.meta.solution||t("dash.legacyUnnamed"))}</b>`})}</span><span style="display:flex;gap:8px"><button class="btn" data-act="legacy">${esc(t("dash.legacyAdd"))}</button><button class="btn ghost" data-act="legacy-dismiss">${esc(t("dash.legacyDismiss"))}</button></span></div>`:""}
