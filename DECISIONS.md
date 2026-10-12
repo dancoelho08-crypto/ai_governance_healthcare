@@ -2434,10 +2434,11 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
 
 ### D-83 The page says when its server retires by other rules, and stops decisions
 
-- Status: Proposed (implements the client side D-76 listed as not done, and the
-  owner's design v2 on #168, "a blocking banner on mismatch"; the choices below
-  that the design left open, what "blocking" stops, dismissal, and an older
-  server, are this change's, for the owner to accept)
+- Status: Accepted (the owner, 2026-10-11: "accept as built", after the choices
+  below were set out). Before that: Proposed (implements the client side D-76
+  listed as not done, and the owner's design v2 on #168, "a blocking banner on
+  mismatch"; the choices below that the design left open, what "blocking" stops,
+  dismissal, and an older server, are this change's, for the owner to accept)
 - **The page carries its rules.** `scripts/build_app.py` writes the primary's
   rule-set hash into the page as `BUILD.ruleSetHash`, computed by
   `build_manifest.manifest()`, the function that writes `manifest.json` beside
