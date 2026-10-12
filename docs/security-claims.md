@@ -1667,7 +1667,7 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
   allowance by naming it. A failed call is counted against its source, which is the
   socket peer (or the proxy-reported address only inside `TRUSTED_PROXY_CIDR`),
   never a header a client can rotate. Through `/mcp` the source is the peer the
-  proxy itself observed, never a client's `X-Forwarded-For` (C-135).
+  proxy itself observed, never a client's `X-Forwarded-For` (C-139).
 - **Asserted in:** `docs/agent-api.md` — "A working token** may make 60 calls per 60 seconds (`AGENT_RATE_LIMIT_MAX_REQUESTS`), lower than the limit a person at the dashboard has (240)."
 - **Status:** enforced
 - **Enforced by:**
@@ -1818,7 +1818,7 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
   `server/tests/test_agent_vocabulary.py::test_the_api_role_may_only_read_the_vocabulary`
   `server/tests/test_agent_mutations.py::test_each_guard_is_noticed_when_broken`
 
-### C-119 The MCP service is off unless its profile is asked for
+### C-123 The MCP service is off unless its profile is asked for
 
 - **Claim:** A plain `docker compose up` starts neither the MCP service nor its
   gate; only `--profile agent-mcp` does. With the profile off, the proxy's `/mcp`
@@ -1837,7 +1837,7 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
   `tests/test_stack_mcp.py::the proxy's /mcp is a 502 with nothing behind it`
   `tests/test_proxy_identity.py::mcp route: with {label}, POST /mcp is a 502`
 
-### C-120 The MCP service holds no credential of its own
+### C-124 The MCP service holds no credential of its own
 
 - **Claim:** The MCP service is given no token, secret, password or key: none in
   its environment, no env file, no way to the database, and no setting that could
@@ -1852,7 +1852,7 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
   `mcp/tests/test_mcp_service.py::test_a_token_is_not_kept_after_its_request`
   `mcp/tests/test_mcp_mutations.py::test_each_guard_is_noticed_when_broken`
 
-### C-121 A token is forwarded for one request and is in no log, error or result
+### C-125 A token is forwarded for one request and is in no log, error or result
 
 - **Claim:** Each request's own bearer token is forwarded, for that request only, to
   the agent API's routes. It is stored nowhere and is in no log line of the MCP
@@ -1873,7 +1873,7 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
   `mcp/tests/test_mcp_mutations.py::test_each_guard_is_noticed_when_broken`
   `mcp/tests/test_mcp_abuse.py::test_a_hostile_request_cannot_write_a_line_or_a_marker_into_the_log`
 
-### C-122 The MCP tools are exactly three read-only ones
+### C-126 The MCP tools are exactly three read-only ones
 
 - **Claim:** The service registers `whoami`, `list_portfolio` and `get_project` and
   nothing else: no write tool, no resource, no prompt and no tool that takes a URL
@@ -1893,7 +1893,7 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
   `mcp/tests/test_mcp_mutations.py::test_each_guard_is_noticed_when_broken`
   `tests/test_stack_mcp.py::tools/list is exactly the three read-only tools`
 
-### C-123 No free text, name or email reaches a model through the MCP server
+### C-127 No free text, name or email reaches a model through the MCP server
 
 - **Claim:** Text planted in a stored record, in every field and as an item, project
   or checkpoint key, is in no tool result and no error: not a name, an email, a
@@ -1907,7 +1907,7 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
   `tests/test_stack_mcp.py::hostile text planted in the record is in no answer`
   `server/tests/test_agent_api.py::test_nothing_hostile_planted_anywhere_reaches_an_agent`
 
-### C-124 The service checks every answer's shape a second time, and says what that cannot do
+### C-128 The service checks every answer's shape a second time, and says what that cannot do
 
 - **Claim:** Every string the service passes on must be shaped like an id (one token
   of at most 32 characters, no space, no run of five digits), a status or decision
@@ -1930,7 +1930,7 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
   stops it. A custom framework whose words are longer or have digits or
   punctuation would be refused whole (D-91 default (d)). (#164)
 
-### C-125 A failure is a fixed message, never the token or the upstream's body
+### C-129 A failure is a fixed message, never the token or the upstream's body
 
 - **Claim:** Every failure the service reports is one of a few fixed messages. The
   token and the upstream's response body are in none of them; a 422's message is cut
@@ -1947,7 +1947,7 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
   `mcp/tests/test_mcp_integration.py::test_a_token_that_is_wrong_in_any_way_gets_the_one_message`
   `mcp/tests/test_mcp_docs.py::test_the_error_table_is_every_message_the_service_can_say`
 
-### C-126 The Host and Origin are validated, and no CORS header is sent
+### C-130 The Host and Origin are validated, and no CORS header is sent
 
 - **Claim:** A request whose `Host` is not on the operator's list is refused, so is
   one carrying an `Origin` that is not listed (the list is empty by default), both
@@ -1966,7 +1966,7 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
   `tests/test_stack_mcp.py::a foreign browser Origin is refused`
   `tests/test_stack_mcp.py::a foreign Host is refused`
 
-### C-127 The proxy's /mcp route skips sign-on, strips every identity header and sets none
+### C-131 The proxy's /mcp route skips sign-on, strips every identity header and sets none
 
 - **Claim:** `/mcp` bypasses single sign-on, deletes every header that could be read
   as an identity (and `X-Client-Address` and `X-Proxy-Secret`) and sets none, even
@@ -1986,7 +1986,7 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
   `tests/test_proxy_mcp_mutations.py`
   `tests/test_proxy_identity.py::mcp route: X-Client-Address is the peer this proxy observed`
 
-### C-128 The MCP service can reach the gate and nothing else
+### C-132 The MCP service can reach the gate and nothing else
 
 - **Claim:** `mcp` is on the internal `agent` network with `mcp-gate` and no other
   network, publishes no port, and from inside it the API, the proxy and the database
@@ -2002,7 +2002,7 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
   `tests/test_stack_mcp.py::from inside mcp only the gate is reachable (not the API, proxy or database)`
   `tests/test_stack_mcp.py::mcp is on the agent network and nothing else`
 
-### C-129 The gate serves only the three GET routes and the MCP path, and holds the API's secret
+### C-133 The gate serves only the three GET routes and the MCP path, and holds the API's secret
 
 - **Claim:** `mcp-gate` forwards only the three agent `GET` routes to the API and
   only `/mcp` to the service (and answers its own static health route), deletes
@@ -2024,7 +2024,7 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
   `tests/test_proxy_identity.py::gate: a body over the agent listener's cap is refused`
   `tests/test_proxy_mcp_mutations.py`
 
-### C-130 The MCP image is non-root, locked and pinned, and its containers are hardened
+### C-134 The MCP image is non-root, locked and pinned, and its containers are hardened
 
 - **Claim:** The image installs only from a hash-verified lock with no pip, from
   digest-pinned bases, runs as a numeric non-root user with no login shell and a
@@ -2043,7 +2043,7 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
   `tests/test_supply_chain.py::no pip, setuptools or ensurepip is anywhere in the MCP runtime image`
   `tests/test_stack_mcp.py::mcp has a read-only root filesystem`
 
-### C-131 Only an empty AGENT_ID_SECRET turns the agent API off for everyone
+### C-135 Only an empty AGENT_ID_SECRET turns the agent API off for everyone
 
 - **Claim:** Turning the MCP service off does not stop a person calling the agent
   API with their own program; the API is off only while `AGENT_ID_SECRET` is empty,
@@ -2054,7 +2054,7 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
   `server/tests/test_agent_api.py::test_the_agent_api_is_off_without_its_secret`
   `mcp/tests/test_mcp_integration.py::test_it_says_so_when_the_agent_api_is_off`
 
-### C-132 The MCP service is stateless and two callers never see each other's data
+### C-136 The MCP service is stateless and two callers never see each other's data
 
 - **Claim:** The service keeps no session and hands out no session id; each request
   stands alone with its own token, and interleaved callers with different tokens each
@@ -2067,7 +2067,7 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
   `mcp/tests/test_mcp_integration.py::test_two_people_calling_at_once_never_see_each_others_projects`
   `mcp/tests/test_mcp_docs.py::test_the_documented_curl_commands_run_and_answer_what_the_page_shows`
 
-### C-133 The MCP service bounds its body, its time and its concurrency
+### C-137 The MCP service bounds its body, its time and its concurrency
 
 - **Claim:** A request body over the limit is refused, a body not complete within
   its deadline is dropped by the service with `408` (the gate cuts off its own
@@ -2097,7 +2097,7 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
   `tests/test_proxy_identity.py::mcp route: a body over the cap is refused`
   `tests/test_proxy_identity.py::mcp route: a service that does not answer in 30 seconds is an error`
 
-### C-134 The proxy and the gate keep a token out of their logs
+### C-138 The proxy and the gate keep a token out of their logs
 
 - **Claim:** The proxy's log redacts the query string of `/mcp` and the
   `Authorization` header; the gate's log redacts the query string of every request.
@@ -2109,7 +2109,7 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
   `tests/test_proxy_identity.py::gate: its log keeps no`
   `tests/test_proxy_mcp_mutations.py`
 
-### C-135 The address a call is limited and recorded by is the one the edge observed
+### C-139 The address a call is limited and recorded by is the one the edge observed
 
 - **Claim:** The source address the API rate-limits and audits for a call through
   `/mcp` is the address of the peer the proxy itself observed. The proxy deletes any
@@ -2132,7 +2132,7 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
   `tests/test_stack_mcp.py::a valid call's source in the read trail is the peer, not a claim`
   `mcp/tests/test_mcp_details.py::test_the_callers_address_is_the_proxys_header_and_an_ip_address_or_nothing`
 
-### C-136 The gate is inside the trust boundary, and the documentation says so
+### C-140 The gate is inside the trust boundary, and the documentation says so
 
 - **Claim:** `mcp-gate` shares the `edge` network with the API and holds
   `PROXY_SHARED_SECRET`, so a compromised gate can forge an identity to the API as a
@@ -2146,7 +2146,7 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
   `tests/test_compose_isolation.py::the gate without the shared secret`
   `tests/test_compose_isolation.py::mcp on the edge network`
 
-### C-137 The service writes no request content to its log, and a flood is a bounded log
+### C-141 The service writes no request content to its log, and a flood is a bounded log
 
 - **Claim:** Only the service's own messages reach its log, one bounded JSON object a
   line: the method and path (only if known), the status, and the class of an

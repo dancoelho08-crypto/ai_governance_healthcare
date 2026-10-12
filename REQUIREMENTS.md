@@ -1479,8 +1479,8 @@ honest answer and is a gap worth closing; see R-19.
   (off by default, the network, no credential, hardening, the image),
   `tests/test_proxy_identity.py` and `tests/test_proxy_mcp_mutations.py` (the
   proxy route and the gate, with a real Caddy), `tests/test_supply_chain.py` and
-  `tests/test_stack_mcp.py` (the image and the whole stack); claims C-119 to
-  C-134. Not enforced: that a given model, MedGemma or any other, works as a
+  `tests/test_stack_mcp.py` (the image and the whole stack); claims C-123 to
+  C-138. Not enforced: that a given model, MedGemma or any other, works as a
   chatbot over these tools (an evaluation plan is documented, and no model can run
   in CI), and that a front door other than this repository's Caddy lets `/mcp`
   through (the documentation says how, per front door, and says where it cannot).
