@@ -1904,8 +1904,9 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
 
 ### D-80 check-app resolves every name on a real parse of the built script
 
-- Status: Proposed (implements #176; the parser and the rules below are this
-  change's choice, for the owner to accept)
+- Status: Accepted (the owner, 2026-10-11, on reviewing the open decisions one
+  by one). Before that: Proposed (implements #176; the parser and the rules
+  below are this change's choice, for the owner to accept)
 - **What it checks.** `scripts/check_app.py` parses the inline script of the
   published page, and of a build of every `app/frameworks/*/build.json` made
   into a temporary directory, and resolves every identifier through its scopes.
@@ -1980,7 +1981,9 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
 
 ### D-81 The spelling guard: listed roots, broad reports, suggestions only
 
-- Status: Proposed (built for #169; the owner has not yet confirmed it)
+- Status: Accepted (the owner, 2026-10-11, on reviewing the open decisions one
+  by one). Before that: Proposed (built for #169; the owner has not yet
+  confirmed it)
 - **Nothing is ever written.** `pixi run check-spelling` reports. `pixi run
   fix-spelling` (`--fix`) prints, on stdout, a unified diff of suggested
   respellings that `git apply` takes, with paths from the repository root
@@ -2276,8 +2279,9 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
 
 ### D-82 One export schema for every framework, and one fingerprint rule
 
-- Status: Proposed (implements #177; the choices below are this change's, for
-  the owner to accept)
+- Status: Accepted (the owner, 2026-10-11, on reviewing the open decisions one
+  by one). Before that: Proposed (implements #177; the choices below are this
+  change's, for the owner to accept)
 - **The schema describes any framework's export.** `schema/project.schema.json`
   was CHAI's alone (`"schema": {"const": "chai-review/2"}`, CHAI's statuses,
   categories and item ids), so every export of a build of another framework
@@ -2535,7 +2539,9 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
 
 ### D-84 The crosswalk is checked against OPTICA's definition
 
-- Status: Proposed (built for #174; the owner has not yet confirmed it)
+- Status: Accepted (the owner, 2026-10-11, on reviewing the open decisions one
+  by one). Before that: Proposed (built for #174; the owner has not yet
+  confirmed it)
 - **The problem.** docs/crosswalk.md described the reviewed, corrected crosswalk
   (0 equivalent, 61 partial, 16 OPTICA-only, 36 CHAI criteria cited; 59 and 18
   after the owner dropped the 5.3 and 7.4 claim) while OPTICA's
@@ -2662,7 +2668,9 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
 
 ### D-85 The Markdown export is audited as rendered, worst case first
 
-- Status: Proposed (a testing choice made on #167; the owner may change it)
+- Status: Accepted (the owner, 2026-10-11, on reviewing the open decisions one
+  by one). Before that: Proposed (a testing choice made on #167; the owner may
+  change it)
 - **Render the export, audit the HTML.** `tests/test_markdown_render.py` renders
   the Markdown report with markdown-it-py, a CommonMark reference
   implementation, in four configurations: the CommonMark preset and GFM
@@ -2712,7 +2720,9 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
 
 ### D-87 OPTICA's overview says what it groups by, not five stakeholders in sequence
 
-- Status: Proposed (built for #175; the owner has not yet confirmed it)
+- Status: Accepted (the owner, 2026-10-11, on reviewing the open decisions one
+  by one). Before that: Proposed (built for #175; the owner has not yet
+  confirmed it)
 - **The problem.** The OPTICA overview's lede ("answered by five stakeholders in
   sequence"), its "who owes the next answers" note ("OPTICA is a relay: each stage
   is completed by one stakeholder before the next begins"), its column header
@@ -2755,9 +2765,10 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
 
 ### D-86 A save the server refused is not retried, and says why
 
-- Status: Proposed (the retry rule is the owner's request on #186; the
-  classification below, and what a refusal keeps and says, are this change's,
-  for the owner to accept)
+- Status: Accepted (the owner, 2026-10-11, on reviewing the open decisions one
+  by one). Before that: Proposed (the retry rule is the owner's request on #186;
+  the classification below, and what a refusal keeps and says, are this
+  change's, for the owner to accept)
 - **Three outcomes, by one function.** `classifyStatus()`
   (`app/js/00-core/20-stores.js`) maps an HTTP status to a `SaveOutcome`: 401
   and 403 are `DENIED`, 404 is `GONE`, 408, 429 and 5xx are `RETRY`, any other
@@ -2857,8 +2868,9 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
 
 ### D-89 Agents read through per-user tokens the app mints
 
-- Status: Accepted for the owner's decisions 1 to 4 and 5 on #164 (2026-10-10);
-  the defaults listed below are Proposed, for the owner to confirm
+- Status: Accepted: the owner's decisions 1 to 5 on #164 (2026-10-10), and the
+  defaults listed below (the owner, 2026-10-11, on reviewing the open decisions).
+  Before that, the defaults were Proposed
 - **The question.** An agent has no browser session, so it cannot come through the
   front door's single sign-on, and R-06 says the API reads identity from the proxy
   header and nothing else. #164 asks for a way for a program to read the registered
@@ -3010,9 +3022,8 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
       app has to notice a departure.
     - An in-app administrator role. The repository has none, and adding one to
       revoke a token would add an identity and a permission to review.
-- **Proposed defaults, for the owner to confirm.** Where the owner's answer left
-  a
-  gap, this is what was built.
+- **Defaults, accepted by the owner (2026-10-11).** Where the owner's answer left
+  a gap, this is what was built.
     - (a) "An admin can revoke" is an operator action (`make agent-tokens`),
       with no
       new role; a person can also revoke their own through the API.
