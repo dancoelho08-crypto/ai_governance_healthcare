@@ -27,6 +27,7 @@ function applyRO(root){
    because the remedies are completely different, and offer a retry. */
 function fatalError(title, detail, opts){
   const o = opts || {};
+  agentLeave();
   document.body.classList.remove("home");
   document.body.classList.add("ro");
   setMode(o.mode || t("mode.notConnected"), "ro");
@@ -96,6 +97,7 @@ function relocalize(){
   if(MODE === Mode.LOCAL) showStorageWarning();
   else if(MODE === Mode.API) showScopeNotice();
   showRulesBanner();
-  if(document.body.classList.contains("home")) renderDashboardShell();
+  if(agentPageShown()) renderAgentPage(false);   // draws it again, without the token
+  else if(document.body.classList.contains("home")) renderDashboardShell();
   else if(S) renderProject(false);
 }
