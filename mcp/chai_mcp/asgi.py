@@ -19,7 +19,9 @@ right is the agent API's answer, given to the tool that asked.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from collections.abc import MutableMapping
 from typing import Any
 
@@ -39,6 +41,22 @@ log = logging.getLogger("chai.mcp.access")
 
 MCP_PATH = "/mcp"
 HEALTH_PATH = "/healthz"
+KNOWN_PATHS = frozenset({MCP_PATH, HEALTH_PATH})
+KNOWN_METHODS = frozenset({"GET", "POST", "DELETE", "PUT", "PATCH", "OPTIONS", "HEAD"})
+
+
+# The one content coding a request may carry (an HTTP value, RFC 9110).
+IDENTITY_CODING = "identity"
+
+
+def _body_complete(message: MutableMapping[str, Any]) -> bool:
+    """Is this the last piece of the request body, or not a piece of it at all?"""
+    is_piece = message["type"] == "http.request"  # enum-ok: ASGI protocol value
+    return not is_piece or not message.get("more_body")
+
+
+class BodyTimeout(Exception):
+    """The request's body was not complete in time."""
 
 
 class Guard:
@@ -46,6 +64,7 @@ class Guard:
 
     def __init__(self, app: ASGIApp, settings: Settings) -> None:
         self.app = app
+        self._body_timeout = settings.body_timeout_seconds
         self._security = TransportSecurityMiddleware(transport_security(settings))
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -60,15 +79,43 @@ class Guard:
                 status = message["status"]
             await send(message)  # type: ignore[arg-type]
 
+        deadline = time.monotonic() + self._body_timeout
+
+        complete = False
+
+        async def bounded() -> MutableMapping[str, Any]:
+            """The body must arrive whole by the deadline, or the request is dropped.
+            Once it has, nothing more is timed: the rest is the response."""
+            nonlocal complete
+            if complete:
+                return await receive()  # type: ignore[return-value]
+            left = deadline - time.monotonic()
+            try:
+                async with asyncio.timeout(max(left, 0)):
+                    message = await receive()
+            except TimeoutError:
+                raise BodyTimeout from None
+            complete = _body_complete(message)
+            return message  # type: ignore[return-value]
+
         try:
             refusal = await self._refusal(scope)
             if refusal is not None:
                 await refusal(scope, receive, watching)
             else:
-                await self.app(scope, receive, watching)
+                await self.app(scope, bounded, watching)  # type: ignore[arg-type]
+        except BodyTimeout:
+            if status == 500:  # nothing was sent yet
+                await PlainTextResponse("Request timeout.", status_code=408)(
+                    scope, receive, watching
+                )
         finally:
-            # Path only, never the query: a token a client put there is not logged.
-            log.info("%s %s %s", scope["method"], scope["path"], status)
+            # The method, the path if it is ours, and the status. Never the query, a
+            # header or a body: a token a client put there is not logged.
+            # A path is logged only if it is one of ours; any other is a client's text.
+            seen = scope["path"] if scope["path"] in KNOWN_PATHS else "(other)"
+            verb = scope["method"] if scope["method"] in KNOWN_METHODS else "(other)"
+            log.info("%s %s %s", verb, seen, status)
 
     async def _refusal(self, scope: Scope) -> Response | None:
         path, method = scope["path"], scope["method"]
@@ -89,6 +136,9 @@ class Guard:
             return PlainTextResponse(
                 "Method not allowed.", status_code=405, headers={"Allow": "POST"}
             )
+        encoding = request.headers.get("content-encoding", "").strip().lower()
+        if encoding and encoding != IDENTITY_CODING:
+            return PlainTextResponse("Unsupported content encoding.", status_code=415)
         if scope.get("query_string"):
             return PlainTextResponse("No query string is accepted.", status_code=400)
         if bearer_token(request.headers.get("authorization")) is None:

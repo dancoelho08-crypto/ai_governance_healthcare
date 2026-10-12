@@ -99,6 +99,23 @@ MUTANTS: tuple[Mutant, ...] = (
         ),
     ),
     Mutant(
+        "the access log redacts only a plain agent prefix",
+        "app/securitylog.py",
+        'MIGHT_BE_AGENT = re.compile(r"(?i)agent|%|//|/\\.{1,2}(?:/|$)")',
+        'MIGHT_BE_AGENT = re.compile(r"^/api/agent/")',
+        (
+            "test_the_access_log_redacts_every_spelling_the_proxy_does",
+            "test_a_token_in_a_dot_segment_url_is_not_logged_by_a_real_uvicorn",
+        ),
+    ),
+    Mutant(
+        "the access log ignores the word agent in a query",
+        "app/securitylog.py",
+        'or "agent" in query.lower()',
+        "or False",
+        ("test_the_access_log_redacts_every_spelling_the_proxy_does",),
+    ),
+    Mutant(
         "a call is not written to the read trail",
         "app/agent.py",
         "await record_access(",
@@ -463,7 +480,7 @@ MUTANTS: tuple[Mutant, ...] = (
     Mutant(
         "the access log keeps an agent query string",
         "app/securitylog.py",
-        "            if mark and path.startswith(self.PREFIX):",
+        '            if mark and (self.MIGHT_BE_AGENT.search(path) or "agent" in query.lower()):',
         "            if False:",
         (
             "test_the_access_log_does_not_keep_a_query_on_an_agent_route",

@@ -1,4 +1,4 @@
-"""``python -m app``: run the service. Refuses to start on an unsafe setting."""
+"""``python -m chai_mcp``: run the service. Refuses to start on an unsafe setting."""
 
 from __future__ import annotations
 
@@ -28,7 +28,11 @@ def main() -> int:
         proxy_headers=False,
         timeout_graceful_shutdown=10,
         timeout_keep_alive=5,
+        # More simultaneous connections than this are answered 503, not held.
+        limit_concurrency=256,
         log_config=None,
+        # Its own lines are reduced to nothing by the log filter anyway.
+        log_level="warning",
     )
     return 0
 

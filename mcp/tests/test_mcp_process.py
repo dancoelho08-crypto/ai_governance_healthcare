@@ -16,7 +16,7 @@ import httpx
 
 from .harness import FakeAPI, Served, call, free_port, session
 
-TOKEN = "agt_0123456789abcdef.PROCESSSECRETPROCESSSECRETPROCESSSECRET12"
+TOKEN = "agt_0123456789abcdef.PROCESSSECRETPROCESSSECRETPROCESSSECRET1200"
 
 
 def env_for(**over: str) -> dict[str, str]:

@@ -12,26 +12,54 @@ own vocabulary; a person or a project is an opaque id or reference.
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
-# The shape of a vocabulary word: a status, a decision, an item or checkpoint id. Up to
-# four plain words of at most 48 characters. Narrower than the API's own filter
-# (server/app/config.py AGENT_VALUE_SHAPE) on purpose: a sentence or an address is not a
-# word, and a shape is all this service can tell. It cannot tell a name that is one word
-# from a status, and does not claim to: the API's list of the build's own words does
-# (D-89), and this is a second wall behind it, not a replacement.
-WORD = r"^[A-Za-z0-9][A-Za-z0-9,&/+._-]*( [A-Za-z0-9,&/+._-]+){0,3}$"
-WORD_MAX = 48
-KEY = r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+# What the service holds an answer's strings to. This is a SHAPE filter, a stand-in for
+# the build's own list of words that this service does not have (the API has it, D-89):
+#
+# * an id (an item, a checkpoint, a framework) is one token of letters, digits, dots,
+#   hyphens and underscores, at most 32 characters, with no space;
+# * a status or a decision is one to three plain words of letters, at most 32
+#   characters, so no digits, no punctuation and no sentence.
+#
+# Every real value of this repository's frameworks fits, with room to spare (the
+# longest, "Proceed with conditions", is 23 characters). What a shape cannot do is tell
+# a short phrase of plain words ("Jane Doe") from a decision: that is the API's list,
+# and this is a second wall behind it, not a replacement. A custom framework whose
+# words are longer, or have digits or punctuation, is refused whole until the shape is
+# widened here.
+ID = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$"
+ID_MAX = 32
+WORD = r"^[A-Za-z]+( [A-Za-z]+){0,2}$"
+WORD_MAX = 32
+KEY = ID
 PERSON = r"^u_[0-9a-f]{32}$"
 PROJECT = r"^pr_[0-9a-f]{32}$"
 TOKEN_ID = r"^[0-9a-f]{16}$"
 
 Word = Annotated[str, Field(pattern=WORD, max_length=WORD_MAX)]
-Key = Annotated[str, Field(pattern=KEY, max_length=64)]
+
+
+def _no_long_digit_run(value: str) -> str:
+    """An id with five digits in a row is a number of somebody's (an MRN, a phone), not
+    one of a framework's ids, whose longest run is two. A heuristic stand-in for the
+    list of words this service does not have."""
+    if DIGIT_RUN.search(value):
+        raise ValueError("an id does not hold a long number")
+    return value
+
+
+DIGIT_RUN = re.compile(r"\d{5,}")
+IdWord = Annotated[
+    str, Field(pattern=ID, max_length=ID_MAX), AfterValidator(_no_long_digit_run)
+]
+Key = Annotated[
+    str, Field(pattern=KEY, max_length=ID_MAX), AfterValidator(_no_long_digit_run)
+]
 PersonId = Annotated[str, Field(pattern=PERSON)]
 ProjectRef = Annotated[str, Field(pattern=PROJECT)]
 
@@ -52,7 +80,7 @@ class Whoami(_Out):
 
 
 class Item(_Out):
-    id: Word = Field(description="The item's id, a word of the framework's own.")
+    id: IdWord = Field(description="The item's id, a word of the framework's own.")
     status: Word | None = Field(
         description="The status as recorded by a person; null when none."
     )
@@ -67,7 +95,9 @@ class Item(_Out):
 
 
 class Gate(_Out):
-    id: Word = Field(description="The checkpoint's id, a word of the framework's own.")
+    id: IdWord = Field(
+        description="The checkpoint's id, a word of the framework's own."
+    )
     decision: Word | None = Field(
         description="The decision as recorded; null when none."
     )

@@ -22,10 +22,14 @@
 	# Plain HTTP on an internal network: nothing here is a public name.
 	auto_https off
 
-	# Trust X-Forwarded-For from the proxy, which is on a private address, so
-	# {client_ip} below is the caller and not the proxy.
+	# NO trusted_proxies, and no {client_ip} anywhere: the caller's address is the
+	# X-Client-Address the proxy sets from the peer it observed, taken as it is. This
+	# file never reads X-Forwarded-For, which a client could have written.
 	servers {
-		trusted_proxies static private_ranges
+		timeouts {
+			read_header 10s
+			read_body 10s
+		}
 	}
 }
 
@@ -47,6 +51,11 @@ http://:8081 {
 				request>headers>X-Access-Token replace REDACTED
 			}
 		}
+	}
+
+	# The container's own health check: static, and it reaches nothing.
+	handle /gate-health {
+		respond "ok" 200
 	}
 
 	@agentread {
@@ -144,14 +153,17 @@ http://:8082 {
 			request_header -X-Forwarded-User
 			request_header -X-Forwarded-Preferred-Username
 			request_header -X-Proxy-Secret
+			request_header -X-Forwarded-For
+			request_header -Forwarded
+			request_header -X-Real-IP
 
 			header Cache-Control "no-store"
 
+			# X-Client-Address is passed on as the proxy set it (the proxy deletes any
+			# a client sent and writes the peer it observed). The service hands it to
+			# the other listener below.
 			reverse_proxy {$MCP_UPSTREAM:mcp:8000} {
 				flush_interval -1
-				# Set, never forwarded: whatever a client sent under this name is
-				# replaced. The service passes it on to the other listener.
-				header_up X-Client-Address "{client_ip}"
 				transport http {
 					dial_timeout 5s
 					response_header_timeout 30s

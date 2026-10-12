@@ -265,14 +265,58 @@ def test_the_documented_defaults_are_the_codes():
     from chai_mcp import config
 
     text = section("Turn it on", 2)
-    assert f"| `MCP_MAX_BODY_BYTES` | `{config.DEFAULT_MAX_BODY_BYTES}` |" in text
-    assert (
-        f"| `MCP_TIMEOUT_SECONDS` | `{int(config.DEFAULT_TIMEOUT_SECONDS)}` |" in text
-    )
-    assert f"| `MCP_MAX_IN_FLIGHT` | `{config.DEFAULT_MAX_IN_FLIGHT}` |" in text
-    assert f"| `MCP_PORT` | `{config.DEFAULT_PORT}` |" in text
+    for name, value in (
+        ("MCP_MAX_BODY_BYTES", config.DEFAULT_MAX_BODY_BYTES),
+        ("MCP_TIMEOUT_SECONDS", int(config.DEFAULT_TIMEOUT_SECONDS)),
+        ("MCP_MAX_IN_FLIGHT", config.DEFAULT_MAX_IN_FLIGHT),
+        ("MCP_MAX_IN_FLIGHT_PER_SOURCE", config.DEFAULT_MAX_IN_FLIGHT_PER_SOURCE),
+        ("MCP_QUEUE_WAIT_SECONDS", int(config.DEFAULT_QUEUE_WAIT_SECONDS)),
+        ("MCP_BODY_TIMEOUT_SECONDS", int(config.DEFAULT_BODY_TIMEOUT_SECONDS)),
+        ("MCP_PORT", config.DEFAULT_PORT),
+    ):
+        assert f"| `{name}` | `{value}` |" in text, name
     limits = section("Limits", 2)
-    assert "64 KB" in limits and "10 seconds" in limits and "16 (" in limits
+    for must in (
+        "64 KB",
+        "10 seconds",
+        "64 in all and 4 from one source",
+        "up to a second",
+        "Not bounded per source",
+    ):
+        assert must in limits, must
+    # The compose defaults are the code's.
+    compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
+    for name, value in (
+        ("MCP_MAX_IN_FLIGHT", config.DEFAULT_MAX_IN_FLIGHT),
+        ("MCP_MAX_IN_FLIGHT_PER_SOURCE", config.DEFAULT_MAX_IN_FLIGHT_PER_SOURCE),
+        ("MCP_QUEUE_WAIT_SECONDS", int(config.DEFAULT_QUEUE_WAIT_SECONDS)),
+        ("MCP_BODY_TIMEOUT_SECONDS", int(config.DEFAULT_BODY_TIMEOUT_SECONDS)),
+    ):
+        assert f"{name}: ${{{name}:-{value}}}" in compose, name
+
+
+def test_the_page_does_not_promise_what_the_review_found_false():
+    """Each sentence the review showed untrue stays out, and its true form stays in."""
+    for gone in (
+        "A sentence, an address or markup in any field makes the whole answer",
+        "before anything else is\nlooked at",
+        "more are refused, not queued",
+        "up to four plain words of at most 48",
+        "The caller's own address is passed on, so one person's failures",
+    ):
+        assert gone not in TEXT, gone
+    text = " ".join(TEXT.split())
+    for true in (
+        "is inside the trust boundary, exactly as the proxy is",
+        "Any short phrase of one to three plain words",
+        "a heuristic stand-in",
+        "the peer the proxy sees is that balancer",
+        "can only **lower** the limit",
+        "a request with no `Origin` (or an empty one) is accepted",
+        "A credential that is not shaped like a token never takes one",
+        "Not bounded per source",
+    ):
+        assert true in text, true
 
 
 def test_the_profile_the_page_names_is_the_compose_profile():

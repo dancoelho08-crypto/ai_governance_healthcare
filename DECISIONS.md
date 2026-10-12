@@ -3082,9 +3082,12 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
 
 ### D-91 The MCP server is a thin, stateless, separate service that holds no credential
 
-- Status: Accepted for the owner's decisions of 2026-10-09, 2026-10-10 and
-  2026-10-11 on #164; the defaults listed below are Proposed, for the owner to
-  confirm
+- Status: Accepted: the owner's decisions of 2026-10-09, 2026-10-10 and 2026-10-11
+  on #164, and the defaults listed in this entry (the owner, 2026-10-11). Before
+  that, the decisions were Accepted and the defaults Proposed, for the owner to
+  confirm. Defaults marked "added after the owner's acceptance; confirm" were
+  added or changed in fixing the review findings, and are for the owner to
+  confirm.
 - **The question.** D-89 gave a program a per-user, read-only way into the
   register. #164 PR 3 asks for the chatbot's way in: an MCP server, so a person
   can ask "which projects have criteria marked Not met?" in an interactive client.
@@ -3140,11 +3143,13 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
       it.
     - Answers are checked twice. The API builds them from an allowlist (D-89); the
       service parses each into models that forbid extra fields and hold each string
-      to a shape (up to four plain words of at most 48 characters, an opaque id,
-      a
-      date). A shape cannot tell a name that is one word from a status, which a
-      test
-      states: the first wall is the API's list of the build's own words.
+      to a shape: an id is one token of at most 32 characters with no space and
+      no
+      run of five digits, a status or decision is one to three plain words of
+      letters of at most 32 characters, and the rest are opaque ids and dates. A
+      shape cannot tell a short phrase of plain words (`Jane Doe`) from a
+      decision, which a test states: the first wall is the API's list of the
+      build's own words, and this is a heuristic stand-in for it.
     - Failures are a few fixed messages (`token rejected or expired`, `no such
       project...`, `the governance server is unavailable`, and so on). A 422's own
       message is cut to plain characters, a 429 carries `Retry-After`. The upstream
@@ -3153,13 +3158,60 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
       with two listeners (the same pinned image as the proxy): `:8082` carries the
       proxy's `/mcp` to the service, `:8081` carries the caller's token from the
       service to the three agent `GET` routes and adds the shared secret the API
-      may
-      require (`PROXY_SHARED_SECRET`), which the service never holds. `mcp-gate`
-      is
-      on `edge` and `agent`; `mcp` is on `agent` alone. The caller's address travels
-      as `X-Client-Address`, set by the gate from what the proxy reported, so the
-      API's per-source limit counts the person and not the one service that carries
-      every person's calls.
+      may require (`PROXY_SHARED_SECRET`), which the service never holds.
+      `mcp-gate` is on `edge` and `agent`; `mcp` is on `agent` alone.
+    - The gate is inside the trust boundary (review M1). It is on `edge` with the
+      API and holds the shared secret, so a compromised gate is identity forgery,
+      as a compromised proxy is, and compose.yaml's "the only other member of
+      `edge` is `proxy`" now says "plus, only with the profile, `mcp-gate`".
+      That is
+      judged acceptable because the gate is as small as it can be: a pinned stock
+      Caddy, read-only, one capability, no port, a static upstream per listener,
+      three `GET` routes and one path, serving only requests the proxy already
+      parsed, from one internal client, with a health check. The alternative, to
+      give
+      the service the secret or a route to the API, moves the same risk onto the
+      part that parses a chatbot's requests. An operator who cannot accept it
+      leaves the profile off. The image is Caddy's, so it has a shell; the
+      claim is a small configuration, not an absence of tools.
+    - The caller's address (review H1). The API rate-limits and audits a call by
+      a
+      source address, so it must be what the edge itself observed. The proxy's
+      `/mcp` route deletes `X-Forwarded-For`, `Forwarded`, `X-Real-IP` and
+      `X-Client-Address` from the client and sets `X-Client-Address` to
+      `{remote_host}`, the same value the agent route gives the API as `X-Real-IP`
+      (a site-level directive also removes `X-Client-Address` from every other
+      route). The gate has no `trusted_proxies` and no `{client_ip}`: it passes
+      the
+      header on as it is and hands the API `X-Real-IP` from it, which the API
+      believes only from the gate's address inside `TRUSTED_PROXY_CIDR` (R-71, C-115).
+      The service validates it as an IP address before forwarding. Behind a load
+      balancer the peer is the balancer, so everyone is one source; the page
+      says so.
+    - Slots (review H3). A credential not shaped like a token the API mints (`agt_`,
+      16 hex, `.`, 43 URL-safe characters, ASCII) is refused with the one rejected
+      message before a slot is taken or a request is made. Calls take a slot
+      from a
+      per-source bound (4) and a global one (64), waiting at most a second, then
+      are refused as busy. One source cannot take every slot and garbage takes none.
+    - The log (review M2). Only `chai.mcp` loggers may carry text; every other logger
+      is at WARNING and reduced to its name, level and exception class; one bounded
+      JSON object a line with no traceback; a burst limit; the access line logs
+      the
+      path only if it is `/mcp` or `/healthz`.
+    - Bodies (review M3). The gate's listeners have `read_header` and
+      `read_body` of
+      10 seconds, the proxy `read_header` of 10 seconds and no body deadline: Go's
+      `ReadTimeout` also cancels the context of a handler still running when it
+      expires, so a global one would end every `/api/events` stream, and it would
+      bound the dashboard's largest write. The service drops a body not complete
+      in
+      10 seconds with `408` and frees what it held, refuses a compressed body with
+      `415`, and uvicorn refuses past 256 connections. What is NOT bounded: a slow
+      client's own connection to the proxy (and the gate), which Caddy holds as
+      it
+      does on every route, and connections per source. The documentation says
+      so and leaves that to the front door or load balancer.
     - The proxy. `/mcp` is a `handle` that skips sign-on, deletes the sixteen
       identity header names, `X-Client-Address` and `X-Proxy-Secret`, sets none,
       forwards `POST`, `GET` and `DELETE` on exactly `/mcp`, caps the body at 64
@@ -3170,8 +3222,8 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
     - The service's own front. Host and Origin validated by the SDK's transport
       security before the token is looked at, `MCP_ALLOWED_HOSTS` required to start,
       no CORS and no `OPTIONS`, a query string refused, a 64 KB body, a 10 second
-      timeout, 16 calls in flight (more are refused, not queued), one log line a
-      request (method, path, status), uvicorn's access log off.
+      timeout, 64 calls in flight and 4 a source (a call waits up to a second),
+      one log line a request, uvicorn's access log off.
     - The image. `mcp/Dockerfile`, built like the API's: two stages, a lock verified
       by hash, digests pinned, no pip at runtime, uid 10002 with a `nologin` shell,
       started directly by `python -m chai_mcp`, a health check, read-only root,
@@ -3198,7 +3250,7 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
       (D-89); a second authorization scheme would be a second thing to get wrong.
     - Shipping a client, bundling a model, or endorsing either. The documentation
       shows how to connect one; which is the operator's choice.
-- **Proposed defaults, for the owner to confirm.**
+- **Defaults, accepted by the owner (2026-10-11).**
     - (a) The tool names and parameters above, and that `list_portfolio` takes the
       agent API's filters unchanged.
     - (b) Stateless JSON responses and `POST` only, with `GET` and `DELETE` answered
@@ -3206,11 +3258,20 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
       transport says).
     - (c) The extra `mcp-gate` service and the `agent` network, rather than putting
       `mcp` beside the proxy.
-    - (d) The second wall's shape (four words, 48 characters). A custom framework
-      whose ids, statuses or decisions are longer or have other punctuation
-      would have
-      its answers refused whole until the shape is widened in `models.py`.
-    - (e) The limits: 64 KB, 10 seconds, 16 in flight.
+    - (d) (Changed after the owner's acceptance; confirm: it was four words and
+      48
+      characters.) The second wall's shape (an id of at most 32 characters with
+      no space
+      or
+      five-digit run; a status or decision of one to three plain words of at most
+      32 characters). It is a heuristic stand-in for a list of words. A custom
+      framework whose ids, statuses or decisions are longer or have digits or
+      other punctuation would have its answers refused whole until the shape is
+      widened in `models.py`.
+    - (e) (Changed after the owner's acceptance; confirm: it was 16 in flight, no
+      per-source bound.) The limits: 64 KB, 10 seconds, 64 in flight and 4 a
+      source, a one-second
+      wait, a 10 second body deadline.
     - (f) `MCP_ALLOWED_HOSTS` is required to start; the loopback names are always
       allowed (for the container's health check).
     - (g) The SDK is pinned to the 1.x line (1.30.0). A 2.x exists and was not
@@ -3235,6 +3296,27 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
     - (m) The service cannot tell a person's own call from a model's, and
       neither can
       the API: both are agent access in the read trail.
+    - (n) Added after the owner's acceptance; confirm. The in-flight bounds: 64
+      in
+      all, 4 from one source, a call waits at most 1 second (`MCP_MAX_IN_FLIGHT`,
+      `MCP_MAX_IN_FLIGHT_PER_SOURCE`, `MCP_QUEUE_WAIT_SECONDS`), and a credential
+      not shaped like a token never takes a slot.
+    - (o) Added after the owner's acceptance; confirm. Time limits: headers 10
+      seconds at the proxy and the gate, a body 10 seconds at the service
+      (`MCP_BODY_TIMEOUT_SECONDS`, `408`) and the gate, a compressed body `415`,
+      uvicorn `503` past 256 connections, and no body deadline at the proxy (it
+      would end `/api/events`).
+    - (p) Added after the owner's acceptance; confirm. The gate is inside the
+      trust boundary and the documentation and compose.yaml say so; the profile
+      is to be left off by anyone who cannot accept that.
+    - (q) Added after the owner's acceptance; confirm. The log rules: only
+      `chai.mcp` loggers carry text, one bounded JSON line, no traceback, a burst
+      limit, a path logged only if it is `/mcp` or `/healthz`.
+    - (r) Added after the owner's acceptance; confirm. The source address is the
+      peer the proxy observed (`X-Client-Address`), never a forwarding header, and
+      the gate has no `trusted_proxies`.
+    - (s) Added after the owner's acceptance; confirm. `mcp-gate` has a health
+      route and a Docker health check, and the image has no pip of its own.
 - **Cost, stated.** `/mcp` is a second path reachable without single sign-on, so
   the
   token is the only thing between a caller and the data on it, and a front door

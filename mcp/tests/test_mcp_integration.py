@@ -79,7 +79,10 @@ def sample_doc(**over):
 
 @pytest.fixture
 def stack():
-    with real_api() as api, running_service(api.url, max_in_flight=64) as svc:
+    with (
+        real_api() as api,
+        running_service(api.url, max_in_flight=64, max_in_flight_per_source=64) as svc,
+    ):
         yield api, svc
 
 

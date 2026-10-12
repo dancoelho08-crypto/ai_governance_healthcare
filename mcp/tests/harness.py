@@ -32,6 +32,8 @@ from starlette.routing import Route
 
 from mcp import ClientSession
 
+# A credential shaped like a token the API mints: agt_, 16 hex, a dot, 43 URL-safe.
+TOKEN_OK = "agt_0123456789abcdef." + "A" * 43
 PERSON = "u_" + "a" * 32
 REF = "pr_" + "b" * 32
 
@@ -207,6 +209,10 @@ def settings_for(api_url: str, **over: Any) -> Settings:
         "max_body_bytes": 16 * 1024,
         "timeout_seconds": 5.0,
         "max_in_flight": 16,
+        # A test that is not about slots must never wait for or be refused one.
+        "max_in_flight_per_source": 16,
+        "queue_wait_seconds": 0.0,
+        "body_timeout_seconds": 5.0,
     }
     base.update(over)
     return Settings(**base)
@@ -219,9 +225,7 @@ def running_service(api_url: str, **over: Any) -> Iterator[Served]:
 
 
 @asynccontextmanager
-async def session(
-    served: Served, token: str | None = "agt_0123456789abcdef.TOKEN", **headers: str
-):
+async def session(served: Served, token: str | None = TOKEN_OK, **headers: str):
     """The SDK's own client, over Streamable HTTP, as a chatbot's would be."""
     sent = {"Host": "mcp.example.test", **headers}
     if token is not None:
@@ -242,7 +246,7 @@ def post(served: Served, body: Any, **headers: str) -> httpx.Response:
         "Host": "mcp.example.test",
         "Content-Type": "application/json",
         "Accept": "application/json, text/event-stream",
-        "Authorization": "Bearer agt_0123456789abcdef.TOKEN",
+        "Authorization": f"Bearer {TOKEN_OK}",
         **headers,
     }
     sent = {k: v for k, v in sent.items() if v is not None}
@@ -304,3 +308,87 @@ class LogSweep(logging.Handler):
         logging.getLogger().setLevel(self._level)
         for name, level in self._levels.items():
             logging.getLogger(name).setLevel(level)
+
+
+class ServiceProcess:
+    """``python -m chai_mcp`` as the container runs it, with its output collected."""
+
+    def __init__(self, api_url: str, **env: str) -> None:
+        import os
+        import subprocess
+        import sys
+
+        self.port = free_port()
+        keep = {
+            k: v for k, v in os.environ.items() if k in {"PATH", "SYSTEMROOT", "HOME"}
+        }
+        self.proc = subprocess.Popen(
+            [sys.executable, "-m", "chai_mcp"],
+            env={
+                **keep,
+                "PYTHONUNBUFFERED": "1",
+                "API_BASE_URL": api_url,
+                "MCP_ALLOWED_HOSTS": "mcp.example.test",
+                "MCP_PORT": str(self.port),
+                **env,
+            },
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        self.output = ""
+
+    @property
+    def url(self) -> str:
+        return f"http://127.0.0.1:{self.port}"
+
+    def __enter__(self) -> ServiceProcess:
+        deadline = time.monotonic() + 30
+        while True:
+            try:
+                if httpx.get(f"{self.url}/healthz").status_code == 200:
+                    return self
+            except httpx.HTTPError:
+                pass
+            if self.proc.poll() is not None or time.monotonic() > deadline:
+                raise RuntimeError("the service process did not start")
+            time.sleep(0.1)
+
+    def __exit__(self, *_: object) -> None:
+        import subprocess
+
+        self.proc.terminate()
+        try:
+            self.output, _ = self.proc.communicate(timeout=20)
+        except subprocess.TimeoutExpired:
+            self.proc.kill()
+            self.output, _ = self.proc.communicate()
+
+
+def raw_exchange(
+    port: int,
+    request: bytes,
+    *,
+    wait: float = 5.0,
+    then: bytes = b"",
+    until: bytes = b"",
+) -> bytes:
+    """Send bytes, optionally more after a pause, and return what came back."""
+    with socket.create_connection(("127.0.0.1", port), timeout=wait + 5) as conn:
+        conn.sendall(request)
+        if then:
+            time.sleep(0.3)
+            conn.sendall(then)
+        conn.settimeout(wait)
+        chunks = []
+        try:
+            while True:
+                data = conn.recv(65536)
+                if not data:
+                    break
+                chunks.append(data)
+                if until and until in b"".join(chunks):
+                    break
+        except (TimeoutError, OSError):
+            pass
+        return b"".join(chunks)

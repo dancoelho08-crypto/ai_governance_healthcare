@@ -32,6 +32,20 @@ ENV PYTHONUNBUFFERED=1 \
 # Non-root, no login shell, no home directory.
 RUN useradd --system --no-create-home --shell /usr/sbin/nologin --uid 10002 chaimcp
 
+# The base image ships pip, setuptools and ensurepip for its own interpreter; nothing
+# here installs anything at runtime, so they go (and with them the vendored copies of
+# libraries that vulnerability scanners flag in a place this service can never use).
+RUN rm -rf /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.* \
+           /usr/local/bin/wheel /usr/local/bin/easy_install* \
+           /usr/local/lib/python3.12/site-packages/pip \
+           /usr/local/lib/python3.12/site-packages/pip-* \
+           /usr/local/lib/python3.12/site-packages/setuptools* \
+           /usr/local/lib/python3.12/site-packages/pkg_resources \
+           /usr/local/lib/python3.12/site-packages/wheel* \
+           /usr/local/lib/python3.12/site-packages/_distutils_hack \
+           /usr/local/lib/python3.12/site-packages/distutils-precedence.pth \
+           /usr/local/lib/python3.12/ensurepip
+
 WORKDIR /app
 COPY --from=build /opt/venv /opt/venv
 COPY --chown=root:root chai_mcp ./chai_mcp

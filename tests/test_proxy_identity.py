@@ -159,7 +159,8 @@ FRONT_DOORS = [
 # body bytes it managed to read for each request, which is what the body-cap
 # check needs. /_seen returns that log and is not itself recorded.
 ECHO = """
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import time
 import json
 SEEN = []
 class H(BaseHTTPRequestHandler):
@@ -184,6 +185,7 @@ class H(BaseHTTPRequestHandler):
                          "truncated": truncated})
             if truncated:
                 return
+            time.sleep(float(self.headers.get("X-Echo-Delay") or 0))
             body = json.dumps(dict(self.headers)).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -197,7 +199,7 @@ class H(BaseHTTPRequestHandler):
     do_PATCH = respond
     do_OPTIONS = respond
     def log_message(self, *a): pass
-HTTPServer(("0.0.0.0", 8000), H).serve_forever()
+ThreadingHTTPServer(("0.0.0.0", 8000), H).serve_forever()
 """
 
 failures: list[str] = []
@@ -224,6 +226,7 @@ def request(
     method: str = "GET",
     body: bytes | None = None,
     port: int | None = None,
+    timeout: float = 30,
 ) -> tuple[int, str, dict[str, str]]:
     """Return (status, body, response headers lowercased) for one request.
 
@@ -237,7 +240,7 @@ def request(
         data=body,
     )
     try:
-        with urllib.request.urlopen(req, timeout=30) as response:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
             got = response.read().decode()
             status, raw = response.status, response.headers
     except urllib.error.HTTPError as exc:
@@ -711,8 +714,6 @@ def check_mcp_route(workdir: Path) -> None:
     """
     door = FRONT_DOORS[3]
     signed_in = door[2]
-    # The echo has served every earlier check too: count only what this one adds.
-    earlier = len(echo_seen())
     start_caddy(
         workdir,
         {
@@ -723,11 +724,19 @@ def check_mcp_route(workdir: Path) -> None:
         },
     )
     body = b'{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+    # The address THIS proxy observes, as the agent route gives it to the API.
+    _, ref_body, _ = request("/api/agent/me", BEARER)
+    # The echo has served every earlier check too: count only what this one adds.
+    earlier = len(echo_seen())
+    peer = {k.lower(): v for k, v in json.loads(ref_body).items()}.get("x-real-ip")
     sent = {
         **MCP_HEADERS,
         **FORGED_IDENTITY,
         "X-Client-Address": "6.6.6.6",
         "X-Proxy-Secret": "chosen-by-the-client",
+        "X-Forwarded-For": "203.0.113.250",
+        "X-Real-IP": "203.0.113.251",
+        "Forwarded": "for=203.0.113.252",
     }
     status, got_body, resp = request("/mcp", sent, method="POST", body=body)
     check("mcp route: forwarded with no sign-on", status == 200, f"HTTP {status}")
@@ -746,30 +755,42 @@ def check_mcp_route(workdir: Path) -> None:
         "mcp route: the Origin is passed on for the service to judge",
         got.get("origin") == "https://chat.example.test",
     )
-    for name in (*IDENTITY_HEADERS, "X-Client-Address", "X-Proxy-Secret"):
+    for name in (*IDENTITY_HEADERS, "X-Proxy-Secret"):
         check(
             f"mcp route: a client's {name} is stripped",
             name.lower() not in got,
             f"{name}={got.get(name.lower())!r}",
         )
+    # The address the API will rate-limit and audit is what this edge observed, never a
+    # claim (review H1): every header a client could use to claim one is deleted, and
+    # X-Client-Address is set from the peer, the same value the agent route uses.
     check(
-        "the proxy sets no identity on the mcp route, with a front door configured",
-        not [k for k in got if k.startswith("x-auth-request")],
-        str([k for k in got if k.startswith("x-auth-request")]),
+        "mcp route: X-Client-Address is the peer this proxy observed",
+        bool(peer) and got.get("x-client-address") == peer,
+        f"got {got.get('x-client-address')!r}, the peer is {peer!r}",
+    )
+    claims = ("203.0.113.250", "203.0.113.251", "203.0.113.252", "6.6.6.6")
+    check(
+        "mcp route: no forwarding claim a client made reaches the service",
+        not [c for c in claims if c in json.dumps(got)],
+        str([c for c in claims if c in json.dumps(got)]),
     )
     check(
-        "mcp route: the answer is not cacheable",
-        resp.get("cache-control") == "no-store",
-        f"got {resp.get('cache-control')!r}",
+        "mcp route: a client's X-Real-IP and Forwarded are deleted",
+        "x-real-ip" not in got and "forwarded" not in got,
     )
-    check(
-        "mcp route: the proxy's secret is not given to the service",
-        "mcp-must-never-see-this" not in got_body,
-    )
-    # The security headers are the site's, and this route gets them too.
-    for name, want in EXPECTED_HEADERS.items():
-        check(f"mcp route: {name}", resp.get(name) == want, f"got {resp.get(name)!r}")
-
+    for rotating in ("203.0.113.10", "203.0.113.11", "203.0.113.12"):
+        _, again, _ = request(
+            "/mcp",
+            {**MCP_HEADERS, "X-Forwarded-For": rotating, "X-Client-Address": rotating},
+            method="POST",
+            body=body,
+        )
+        check(
+            f"mcp route: rotating the claimed address ({rotating}) changes nothing",
+            {k.lower(): v for k, v in json.loads(again).items()}.get("x-client-address")
+            == peer,
+        )
     for method in ("GET", "DELETE"):
         status, _, _ = request("/mcp", MCP_HEADERS, method=method)
         check(
@@ -803,13 +824,42 @@ def check_mcp_route(workdir: Path) -> None:
     ]
     check(
         "mcp route: the service saw exactly the three allowed requests",
-        forwarded == [("POST", "/mcp"), ("GET", "/mcp"), ("DELETE", "/mcp")],
+        forwarded == [("POST", "/mcp")] * 4 + [("GET", "/mcp"), ("DELETE", "/mcp")],
         str(forwarded),
     )
     check(
         "mcp route: nothing reached the main API through it",
         not [r for r in echo_seen()[earlier:] if r["path"].startswith("/api/")],
     )
+
+    # X-Client-Address is no client's on ANY route: it is removed for every request.
+    for path, headers in (
+        ("/api/agent/me", BEARER),
+        ("/api/me", signed_in),
+        ("/api/projects", signed_in),
+    ):
+        _, other, _ = request(path, {**headers, "X-Client-Address": "6.6.6.6"})
+        check(
+            f"X-Client-Address is stripped on {path}",
+            "x-client-address" not in {k.lower() for k in json.loads(other)},
+        )
+    check(
+        "the proxy sets no identity on the mcp route, with a front door configured",
+        not [k for k in got if k.startswith("x-auth-request")],
+        str([k for k in got if k.startswith("x-auth-request")]),
+    )
+    check(
+        "mcp route: the answer is not cacheable",
+        resp.get("cache-control") == "no-store",
+        f"got {resp.get('cache-control')!r}",
+    )
+    check(
+        "mcp route: the proxy's secret is not given to the service",
+        "mcp-must-never-see-this" not in got_body,
+    )
+    # The security headers are the site's, and this route gets them too.
+    for name, want in EXPECTED_HEADERS.items():
+        check(f"mcp route: {name}", resp.get(name) == want, f"got {resp.get(name)!r}")
 
     # The body is capped at the edge, as the API's is.
     under = request("/mcp", MCP_HEADERS, method="POST", body=b"a" * 4096)[0]
@@ -870,6 +920,81 @@ def check_mcp_route(workdir: Path) -> None:
         )
         status, text = get("/api/me", signed_in)
         check(f"with {label}, the rest of the proxy is as it was", status == 200)
+
+
+def raw_exchange_bytes(port: int, data: bytes, *, wait: float) -> bytes:
+    """Send bytes and read until the peer answers or closes, or ``wait`` passes."""
+    import socket
+
+    with socket.create_connection(("127.0.0.1", port), timeout=wait) as conn:
+        conn.sendall(data)
+        conn.settimeout(wait)
+        try:
+            return conn.recv(65536)
+        except OSError:
+            return b""
+
+
+def check_mcp_timeouts(workdir: Path) -> None:
+    """A slow service is answered with an error after the response-header timeout
+    (30 seconds) on the route and on the gate's listener, not held for ever."""
+    door = FRONT_DOORS[3]
+    start_caddy(workdir, {**door[1], "MCP_UPSTREAM": "api:8000"})
+    began = time.monotonic()
+    status, _, _ = request(
+        "/mcp",
+        {**MCP_HEADERS, "X-Echo-Delay": "38"},
+        method="POST",
+        body=b"{}",
+        timeout=60,
+    )
+    took = time.monotonic() - began
+    check(
+        "mcp route: a service that does not answer in 30 seconds is an error",
+        status in (502, 504) and took < 36,
+        f"HTTP {status} after {took:.0f}s",
+    )
+    # Headers that never finish arriving are dropped (read_header, 10 seconds).
+    import socket
+
+    def header_trickle(port: int) -> float:
+        began = time.monotonic()
+        with socket.create_connection(("127.0.0.1", port), timeout=30) as conn:
+            conn.sendall(b"POST /mcp HTTP/1.1\r\nHost: x\r\nX-Slow: ")
+            conn.settimeout(20)
+            with contextlib.suppress(OSError):
+                conn.recv(4096)
+        return time.monotonic() - began
+
+    took = header_trickle(PORT)
+    check(
+        "mcp route: headers that never finish arriving are dropped",
+        took < 16,
+        f"still open after {took:.0f}s",
+    )
+    start_gate(workdir, {"PROXY_SHARED_SECRET": "x", "MCP_UPSTREAM": "api:8000"})
+    for label, port in (("the service's", PORT + 1), ("the API's", PORT)):
+        took = header_trickle(port)
+        check(
+            f"gate: headers that never finish arriving are dropped on {label} listener",
+            took < 16,
+            f"still open after {took:.0f}s",
+        )
+    began = time.monotonic()
+    status, _, _ = request(
+        "/mcp",
+        {**MCP_HEADERS, "X-Echo-Delay": "38"},
+        method="POST",
+        body=b"{}",
+        port=PORT + 1,
+        timeout=60,
+    )
+    took = time.monotonic() - began
+    check(
+        "gate: a service that does not answer in 30 seconds is an error",
+        status in (502, 504) and took < 36,
+        f"HTTP {status} after {took:.0f}s",
+    )
 
 
 def start_gate(workdir: Path, env: dict[str, str]) -> None:
@@ -1009,6 +1134,21 @@ def check_mcp_gate(workdir: Path) -> None:
         f"{len(seen(out)) - before} extra request(s)",
     )
 
+    # The container's own health check, and a body cap on the agent routes' listener.
+    status, text, _ = request("/gate-health", {}, port=out)
+    check("gate: its health route answers", status == 200 and text == "ok", f"{status}")
+    status, _, _ = request(
+        "/api/agent/me",
+        {**BEARER, "Content-Type": "text/plain"},
+        port=out,
+        body=b"a" * 20_000,
+    )
+    check(
+        "gate: a body over the agent listener's cap is refused",
+        status == 413,
+        f"{status}",
+    )
+
     # --- :8082, the proxy's way to the service -------------------------------------
     sent = {
         **MCP_HEADERS,
@@ -1016,6 +1156,8 @@ def check_mcp_gate(workdir: Path) -> None:
         "X-Client-Address": "6.6.6.6",
         "X-Proxy-Secret": "chosen-by-the-client",
         "X-Forwarded-For": "198.51.100.7",
+        "X-Real-IP": "198.51.100.8",
+        "Forwarded": "for=198.51.100.9",
     }
     status, text, resp = request("/mcp", sent, method="POST", body=b"{}", port=inn)
     got = {k.lower(): v for k, v in json.loads(text).items()} if status == 200 else {}
@@ -1031,10 +1173,23 @@ def check_mcp_gate(workdir: Path) -> None:
         not [h for h in (*IDENTITY_HEADERS, "X-Proxy-Secret") if h.lower() in got],
         str([h for h in (*IDENTITY_HEADERS, "X-Proxy-Secret") if h.lower() in got]),
     )
+    # The gate takes the address from the proxy as it is, and never from a forwarding
+    # header (review H1): a forged X-Forwarded-For changes nothing.
     check(
-        "gate: the caller's address is the gate's own finding, not the client's claim",
-        got.get("x-client-address") == "198.51.100.7",
+        "gate: X-Client-Address is passed on as the proxy set it",
+        got.get("x-client-address") == "6.6.6.6",
         f"got {got.get('x-client-address')!r}",
+    )
+    check(
+        "gate: a forwarded-for claim never becomes the address",
+        not [
+            c
+            for c in ("198.51.100.7", "198.51.100.8", "198.51.100.9")
+            if c in json.dumps(got)
+        ]
+        and "x-real-ip" not in got
+        and "forwarded" not in got,
+        json.dumps(got)[:200],
     )
     check("gate: the answer is not cacheable", resp.get("cache-control") == "no-store")
     for method in ("GET", "DELETE"):
@@ -1073,6 +1228,31 @@ def check_mcp_gate(workdir: Path) -> None:
         "/mcp", MCP_HEADERS, method="POST", port=inn, body=b"a" * (MCP_BODY_CAP + 4096)
     )[0]
     check("gate: a body over the cap is refused", over == 413, f"HTTP {over}")
+    # A body that is started and never finished is cut off by the gate (review M3). The
+    # echo upstream waits for the rest of it, so what shows the gate gave up is the
+    # upstream's connection being torn down (a truncated body) once the gate's
+    # `read_body` (10 seconds) passes, and not 30 seconds later.
+    import socket
+
+    for label, port, path in (
+        ("the service's listener", inn, "/mcp"),
+        ("the API's listener", out, "/api/agent/me"),
+    ):
+        method = "POST" if port == inn else "GET"
+        before = len(echo_seen())
+        with socket.create_connection(("127.0.0.1", port), timeout=30) as conn:
+            conn.sendall(
+                f"{method} {path} HTTP/1.1\r\nHost: x\r\nContent-Length: 98\r\n"
+                f"Authorization: {BEARER['Authorization']}\r\n\r\n{{".encode()
+            )
+            time.sleep(16)
+            cut = [r for r in echo_seen()[before:] if r["path"] == path]
+        check(
+            f"gate: a body trickled forever is cut off on {label}",
+            bool(cut) and cut[-1]["truncated"],
+            f"upstream saw {cut}",
+        )
+
     # The log keeps no query string and no token.
     request("/api/agent/me?token=LEAKGATE1", BEARER, port=out)
     request("/mcp?token=LEAKGATE2", MCP_HEADERS, method="POST", port=inn, body=b"{}")
@@ -1229,6 +1409,7 @@ def run_checks(workdir: Path) -> None:
     # The optional MCP service's route and its gate (#164, R-73, D-91).
     check_mcp_route(workdir)
     check_mcp_gate(workdir)
+    check_mcp_timeouts(workdir)
 
 
 if __name__ == "__main__":

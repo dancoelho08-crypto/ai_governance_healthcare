@@ -183,8 +183,23 @@ def _read(ctx: Context, relative: str) -> str | None:
     return path.read_text(encoding="utf-8") if path.is_file() else None
 
 
+def _collected(path: str) -> bool:
+    """Would pytest collect this file? Its default patterns: test_*.py and *_test.py.
+    A helper module in a tests directory (a harness, a conftest) holds code and no test
+    pytest runs, so citing it is citing something CI never runs (review L4)."""
+    name = path.rsplit("/", 1)[-1]
+    leading = name.startswith("test_")  # enum-ok: pytest's file-name pattern
+    trailing = name.endswith("_test.py")  # enum-ok: pytest's file-name pattern
+    return name.endswith(".py") and (leading or trailing)
+
+
 def _ci_problem(path: str, ctx: Context) -> str | None:
     """Why CI would NOT run this evidence, or None if it does."""
+    if path.startswith((SERVER_TESTS, MCP_TESTS)) and not _collected(path):
+        return (
+            f"pytest does not collect {path} (test_*.py or *_test.py), so CI never "
+            "runs it"
+        )
     if path == PRECOMMIT_REF:
         return (
             None

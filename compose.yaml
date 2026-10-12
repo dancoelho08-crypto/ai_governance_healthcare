@@ -16,7 +16,11 @@
 #     LAN, or the internet. Only containers sharing a Docker network with it
 #     can connect.
 #   * The only network `api` shares with anything internet-facing is `edge`,
-#     and the only other member of `edge` is `proxy`.
+#     and the only other member of `edge` is `proxy` -- plus, ONLY if the optional
+#     `agent-mcp` profile is turned on, `mcp-gate`. The gate is part of the trust
+#     boundary exactly as the proxy is: it holds PROXY_SHARED_SECRET and sits on
+#     `edge`, so a compromised gate can forge an identity to the API. docs/mcp.md says
+#     why that is judged acceptable and what to do if it is not (leave the profile off).
 #   * `db` lives on `data`, which is `internal: true` -- Docker gives that
 #     bridge no gateway, so Postgres has no route off the host in either
 #     direction, and `db` publishes no host port either.
@@ -486,6 +490,14 @@ services:
     cpus: ${MCP_GATE_CPUS:-1}
     pids_limit: 128
     # Deliberately NO `ports:`: only the proxy (on `edge`) and mcp (on `agent`) reach it.
+    #
+    # THIS SERVICE IS INSIDE THE TRUST BOUNDARY. It is on `edge` with the API and holds
+    # PROXY_SHARED_SECRET, so whoever controls it can send the API a forged identity,
+    # exactly as whoever controls the proxy can. It is kept as small as that allows: a
+    # pinned stock Caddy image, a read-only root, no capability but the one its binary
+    # asks for, no published port, one static upstream per listener, three GET routes
+    # and one path, serving requests the proxy has already parsed from one internal
+    # client. If that is not acceptable to you, leave the `agent-mcp` profile off.
     networks:
       - edge   # to reach the API, and to be reached by the proxy
       - agent  # to be reached by mcp, and to reach it
@@ -497,6 +509,13 @@ services:
       # The API's second lock, if set. The MCP service never sees it: this gate does.
       PROXY_SHARED_SECRET: ${PROXY_SHARED_SECRET:-}
       MCP_UPSTREAM: mcp:8000
+    healthcheck:
+      # A static route of the gate's own: it reaches nothing. (wget is in the image.)
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/gate-health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     depends_on:
       api:
         condition: service_started
@@ -533,7 +552,10 @@ services:
       MCP_PORT: "8000"
       MCP_MAX_BODY_BYTES: ${MCP_MAX_BODY_BYTES:-65536}
       MCP_TIMEOUT_SECONDS: ${MCP_TIMEOUT_SECONDS:-10}
-      MCP_MAX_IN_FLIGHT: ${MCP_MAX_IN_FLIGHT:-16}
+      MCP_MAX_IN_FLIGHT: ${MCP_MAX_IN_FLIGHT:-64}
+      MCP_MAX_IN_FLIGHT_PER_SOURCE: ${MCP_MAX_IN_FLIGHT_PER_SOURCE:-4}
+      MCP_QUEUE_WAIT_SECONDS: ${MCP_QUEUE_WAIT_SECONDS:-1}
+      MCP_BODY_TIMEOUT_SECONDS: ${MCP_BODY_TIMEOUT_SECONDS:-10}
     depends_on:
       mcp-gate:
         condition: service_started
@@ -559,7 +581,9 @@ volumes:
 networks:
   # Internet-facing side. `proxy` publishes a port here; `api` is here so the
   # proxy can reach it. Adding a third service to this network means that
-  # service can also talk straight to the API -- i.e. forge identity. Don't.
+  # service can also talk straight to the API -- i.e. forge identity. Don't. (The one
+  # exception is the optional `mcp-gate`, a Caddy with a static upstream and a
+  # three-route config that is part of the trust boundary: see its service below.)
   edge:
     driver: bridge
 

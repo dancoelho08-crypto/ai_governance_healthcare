@@ -496,9 +496,45 @@ def main() -> int:
                 imp.stdout.strip() == "ok",
                 imp.stderr[-300:],
             )
+            # The filesystem itself, not an import through the venv: the base image's
+            # pip is a binary in /usr/local/bin and a package of its own interpreter,
+            # which `python -m pip` through the venv cannot see (review L3).
+            probe = (
+                "import glob, importlib.util as u\n"
+                "found = [p for pat in ("
+                "'/usr/local/bin/pip*', '/usr/local/bin/easy_install*', "
+                "'/usr/local/lib/python3*/site-packages/pip*', "
+                "'/usr/local/lib/python3*/site-packages/setuptools*', "
+                "'/usr/local/lib/python3*/site-packages/pkg_resources*', "
+                "'/usr/local/lib/python3*/ensurepip', "
+                "'/opt/venv/lib/python3*/site-packages/pip*', "
+                "'/opt/venv/lib/python3*/site-packages/setuptools*') "
+                "for p in glob.glob(pat)]\n"
+                "print(found, u.find_spec('pip'), u.find_spec('ensurepip'), "
+                "u.find_spec('setuptools'))\n"
+            )
+            gone = in_image("-c", probe)
             check(
-                "pip is not in the MCP runtime image",
-                in_image("-m", "pip", "--version").returncode != 0,
+                "no pip, setuptools or ensurepip is anywhere in the MCP runtime image",
+                gone.stdout.strip() == "[] None None None",
+                gone.stdout + gone.stderr,
+            )
+            check(
+                "and the system interpreter cannot import pip either",
+                subprocess.run(
+                    [
+                        "docker",
+                        "run",
+                        "--rm",
+                        "--entrypoint",
+                        "/usr/local/bin/python",
+                        mcp_tag,
+                        "-c",
+                        "import pip",
+                    ],
+                    capture_output=True,
+                ).returncode
+                != 0,
             )
             locked = re.search(r"^mcp==([\d.]+)", mcp_lock, re.M).group(1)
             got = in_image(

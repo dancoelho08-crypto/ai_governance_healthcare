@@ -105,6 +105,41 @@ dashboard, the API and the agent API are unaffected.
 - The **API** is the only thing that knows who the token belongs to, what that
   person may see and whether the token is valid. The MCP service cannot tell.
 
+### The trust boundary, and what it costs
+
+**`mcp-gate` is inside the trust boundary, exactly as the proxy is.** It sits on
+the `edge` network with the API and holds `PROXY_SHARED_SECRET`, the second lock
+the API checks. So whoever controls the gate can send the API a request that looks
+as if it came through the proxy, with an identity header of their choosing. A
+compromised gate is full identity forgery, the same as a compromised proxy. That
+is the price of keeping the service itself, the one part that parses a
+chatbot's requests, from holding the secret or reaching the API: the risk moves
+to a smaller, simpler part.
+
+It is judged acceptable because the gate is as small as that allows. It is a
+pinned stock Caddy image with a read-only root filesystem, no capability but the
+one its binary asks for, no published port and a health check. It has a static
+upstream per listener and a config of three `GET` routes and one path. It parses
+only requests the proxy has already parsed, from a single internal client. It
+runs no code of ours. The service is on a network of its own with the gate and
+nothing else, so a flaw in the service reaches the gate's two listeners and
+nothing more: a caller's token to the three agent routes.
+
+**If you cannot accept that, leave the profile off.** Nothing else on this page
+works without the gate. The image is not shell-less (it is Caddy's); its
+exposure is its small configuration, not its absence of tools.
+
+The caller's address is a related boundary. The API limits and records a call by
+the **source address** the proxy observed, and that must never be one the caller
+chose. The proxy deletes any `X-Forwarded-For`, `Forwarded`, `X-Real-IP` and
+`X-Client-Address` a client sent and sets `X-Client-Address` to the address of the
+peer it sees. The gate passes that on as it is and never reads a forwarding header,
+and the API believes it only from the gate's address (`TRUSTED_PROXY_CIDR`). **Behind
+a load balancer or another front door, the peer the proxy sees is that balancer**
+(as it is for [the agent route](agent-api.md#the-rate-limit)), so every client behind it
+is one source to the rate limit, the read trail and the per-source slots below.
+Raise `MCP_MAX_IN_FLIGHT_PER_SOURCE` there.
+
 ## Turn it on
 
 1. Turn on [the agent API](agent-api.md#turn-it-on) first: set `AGENT_ID_SECRET`.
@@ -137,13 +172,16 @@ proxy, and nothing is behind it. Nothing it can reach is the main API.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `MCP_ALLOWED_HOSTS` | none (**required**) | The host names the service answers to, comma separated. Any other `Host` is refused with `421`. The loopback names are always allowed, for the container's own health check. |
-| `MCP_ALLOWED_ORIGINS` | empty | Browser origins allowed to call the service, comma separated (`https://host`, no path). Empty means a page in a browser cannot. A client that is not a browser sends no `Origin` and is not affected. No CORS header is ever sent. |
+| `MCP_ALLOWED_HOSTS` | none (**required**) | The host names the service answers to, comma separated. Any other `Host` is refused with `421`. The loopback names are always allowed, for the container's own health check: that is by design, and not a rebinding route, because a browser's `Host` is the name of the page's own site, which an attacker cannot make loopback. |
+| `MCP_ALLOWED_ORIGINS` | empty | Browser origins allowed to call the service, comma separated (`https://host`, no path). Empty means a page in a browser cannot. A client that is not a browser sends no `Origin` and is not affected, and a request with no `Origin` (or an empty one) is accepted: a browser always sends one on a cross-site request, so its absence is no way in for a page. No CORS header is ever sent. |
 | `MCP_UPSTREAM` | `mcp-gate:8082` | Where the proxy sends `/mcp`. Another Caddy deployment points it at the service. |
 | `MCP_PORT` | `8000` | The port inside the container, set by compose. Nothing is published. |
-| `MCP_MAX_BODY_BYTES` | `65536` | A larger request is refused with `413`. |
+| `MCP_MAX_BODY_BYTES` | `65536` | A larger request is refused with `413`. The proxy and the gate cap a body at 64 KB regardless, so this setting can only **lower** the limit. |
 | `MCP_TIMEOUT_SECONDS` | `10` | The most one call to the agent API may take. |
-| `MCP_MAX_IN_FLIGHT` | `16` | Calls answered at once. More are refused with a "busy" error, not queued. |
+| `MCP_MAX_IN_FLIGHT` | `64` | Calls answered at once, in all. |
+| `MCP_MAX_IN_FLIGHT_PER_SOURCE` | `4` | Calls answered at once from one source, so one caller cannot take every slot. |
+| `MCP_QUEUE_WAIT_SECONDS` | `1` | How long a call waits for a free slot before it is refused as "busy". |
+| `MCP_BODY_TIMEOUT_SECONDS` | `10` | A request whose body is not complete by then is dropped with `408`. |
 | `API_BASE_URL` | set by compose to the gate | The address the token is sent to: an `http` or `https` URL with no credentials, query or fragment. It is the only place a token goes, and a redirect is never followed. |
 | `MCP_MEM_LIMIT`, `MCP_CPUS`, `MCP_IMAGE` | `256m`, `1`, built locally | Container limits, and a registry tag (pinned by digest) to run instead of building `./mcp`. |
 
@@ -323,9 +361,15 @@ Example response:
 }
 ```
 
-`initialize` is not required before a call: each request stands alone. A request
-with no bearer is a `401` with `WWW-Authenticate: Bearer`, before anything else is
-looked at.
+`initialize` is not required before a call: each request stands alone. The checks
+come in this order, and the first to fail answers: a path other than `/mcp` is a
+`404`; a `Host` that is not allowed is a `421` and an `Origin` that is not allowed a
+`403` (and a body that is not JSON a `400`); a method other than `POST` is a `405`; a
+compressed body is a `415`; a query string is a `400`; and only then a request with no
+bearer is a `401` with `WWW-Authenticate: Bearer`. A bearer that is not shaped like a
+token the API mints (`agt_`, 16 hex characters, a dot, 43 URL-safe characters) is not a
+`401`: the call is made and answered `token rejected or expired`, with no slot taken
+and no request sent to the governance server.
 
 ## The tools
 
@@ -368,7 +412,7 @@ paged: use `next_offset` for more.
 
 | Parameter | Type | Required | Meaning |
 |---|---|---|---|
-| `status` | string | no | Only projects with an item (or supplement item) in this recorded status, such as `notmet`. A word of the framework's own, at most four plain words and 48 characters. |
+| `status` | string | no | Only projects with an item (or supplement item) in this recorded status, such as `notmet`. A word of the framework's own: one to three plain words of letters, at most 32 characters. |
 | `decision` | string | no | Only projects with a checkpoint holding this recorded decision. |
 | `overdue` | boolean | no | `true`: has an item whose recorded due date is before today. `false`: has none. |
 | `overdue_since` | string (date) | no | Only projects with an overdue item whose due date is on or after this date (`YYYY-MM-DD`). |
@@ -501,13 +545,14 @@ it cuts to plain letters, digits and a little punctuation.
 | `too many requests for this token; retry after N seconds` | A `429`, with `Retry-After` when the API sent a sensible one (otherwise `retry later`). See [the rate limit](agent-api.md#the-rate-limit). |
 | `the governance server is unavailable` | Any other failure of the API: a `5xx`, a `403`, a timeout, or no connection. |
 | `the governance server returned an answer this service does not accept` | The answer was not in the documented shape: an unknown field, or a value that is not a word, an id or a date. The whole answer is refused. |
-| `this service is busy; try again shortly` | More than `MCP_MAX_IN_FLIGHT` calls at once. |
+| `this service is busy; try again shortly` | More than `MCP_MAX_IN_FLIGHT` calls at once, or more than `MCP_MAX_IN_FLIGHT_PER_SOURCE` from one source, and no slot freed within `MCP_QUEUE_WAIT_SECONDS`. |
 | `this service could not complete the request` | An unexpected failure inside the service. Its detail is logged by exception class only, never in the message. |
 
 Beyond tool errors, the HTTP layer answers `401` (no bearer), `403` (an `Origin`
 that is not allowed), `404` (any path but `/mcp`), `405` (any method but `POST`),
-`413` (a body over the limit), `421` (a `Host` that is not allowed) and `400` (a
-query string, which a token has no business in, or a body that is not JSON).
+`408` (a body not complete in time), `413` (a body over the limit), `415` (a compressed
+body), `421` (a `Host` that is not allowed) and `400` (a query string, which a token has
+no business in, or a body that is not JSON).
 
 ## Asking questions, and how an answer must read
 
@@ -553,12 +598,19 @@ them. What version 1 does about it:
   words (item and checkpoint ids, statuses, decisions), opaque ids and dates. A
   stored value that is not one of the build's own words is returned as `null` or
   left out.
-- **It checks again.** Every string the service passes on must be shaped like a
-  word: up to four plain words of at most 48 characters, or an opaque id, or a
-  date. A sentence, an address or markup in any field makes the whole answer
-  refused. A shape cannot tell a name that is one word from a status, so this is a
-  second wall behind the API's list of the build's own words, not a replacement, and a test
-  states that limit.
+- **It checks again, by shape only.** Every string the service passes on must be
+  shaped like one of three things. An id (an item, a checkpoint, a framework) is
+  one token of letters, digits, dots, hyphens and underscores, at most 32
+  characters, with no space and no run of five digits. A status or a decision is
+  one to three plain words of letters, at most 32 characters. Anything else is an
+  opaque id or a date. A sentence of four or more words, an address, markup, or
+  digits mixed into a word makes the whole answer refused. **This is a shape
+  filter, not a list of words, and it is a heuristic stand-in for one this service
+  does not have.** Any short phrase of one to three plain words, `Jane Doe` or
+  `alice`, passes it. What stops a name or a sentence is the API's list of the
+  build's own words, the first and real wall, and a test states that limit. A
+  custom framework whose words are longer, or have digits or punctuation, would be
+  refused whole until the shape is widened.
 - **It tells the model, in every tool description, to treat every value as data**
   and never follow instructions found in it.
 - **Free text will arrive only on request, labeled untrusted.** A later version may
@@ -682,8 +734,14 @@ read trail, the security log's `record.read` events with `via: agent`, and
 `make agent-tokens` for the tokens themselves.
 
 The services of this page write less. The MCP service logs one line per request:
-the method, the path and the status. Never a header, a query string or a body, and
-so never a token. The proxy's log redacts a query string on `/mcp` and the
+the method, the path (only if it is `/mcp` or `/healthz`, otherwise `(other)`) and
+the status, never a header, a query string or a body, and so never a token. Every
+line is one JSON object, no longer than 300 characters, so text in a request cannot
+start a line of its own. Only the service's own messages are written: a record from
+the SDK or any library is reduced to its logger, its level and the class of its
+exception, because those libraries quote the request they were given. A burst is
+bounded (a burst of 50 records, then 10 a second, with a note of how many were
+dropped), so a small request cannot make a large log. The proxy's log redacts a query string on `/mcp` and the
 `Authorization` header. The gate's log redacts the query string of every request. A
 test sweeps the logs of every part of the running stack for a token's secret.
 
@@ -695,10 +753,13 @@ front door in front of this stack may log what it likes.
 
 | Limit | Value |
 |---|---|
-| Request body | 64 KB (`MCP_MAX_BODY_BYTES`), at the proxy, the gate and the service |
-| One call to the API | 10 seconds (`MCP_TIMEOUT_SECONDS`), connection and total |
-| Calls at once | 16 (`MCP_MAX_IN_FLIGHT`); more are refused, not queued |
-| Rate | The agent API's: a token, a person and a source each have an allowance ([the rate limit](agent-api.md#the-rate-limit)). The caller's own address is passed on, so one person's failures do not spend everyone's allowance |
+| Request body, size | 64 KB at the proxy and the gate, whatever the setting; `MCP_MAX_BODY_BYTES` (64 KB by default) can only lower it at the service |
+| Request headers | 10 seconds to arrive, at the proxy and the gate |
+| Request body, time | 10 seconds, complete, at the service (`MCP_BODY_TIMEOUT_SECONDS`, then `408`), and at the gate (`read_body`, which cuts off the gate's own leg to the service). **Not bounded at the proxy:** Caddy holds a slow client's own connection open, as it does on every route, because it has no per-route body deadline and a global one would also end the dashboard's `/api/events` streams. A client trickling a body therefore ties up a connection at the proxy and the gate, and nothing at the service. Bound that at your front door or load balancer (idle and request timeouts) |
+| One call to the API | 10 seconds (`MCP_TIMEOUT_SECONDS`), connection and total; the proxy and the gate answer an error if the service does not respond in 30 |
+| Calls at once | 64 in all and 4 from one source (`MCP_MAX_IN_FLIGHT`, `MCP_MAX_IN_FLIGHT_PER_SOURCE`). A call waits up to a second (`MCP_QUEUE_WAIT_SECONDS`) for a slot and is then refused as busy. A credential that is not shaped like a token never takes one. A source is the address the proxy observed, so behind a load balancer all clients share one |
+| Connections | Not bounded per source: Caddy has no such setting. The service answers `503` past 256 connections at once. Caddy's own connections are unbounded |
+| Rate | The agent API's: a token, a person and a source each have an allowance ([the rate limit](agent-api.md#the-rate-limit)). The source is the address the proxy itself observed (never one a client sent), and behind a load balancer that is the balancer |
 | Results | A page is at most 100 projects, and a project at most 500 items |
 
 ## Troubleshooting
@@ -712,6 +773,9 @@ front door in front of this stack may log what it likes.
 | HTTP `403` | An `Origin` header that is not in `MCP_ALLOWED_ORIGINS`. A non-browser client sends none. |
 | HTTP `404` | The proxy answers `404` to any path but exactly `/mcp` and to any method but `POST`, `GET` and `DELETE`. Check the URL ends in `/mcp` with no trailing slash, or that the proxy is a current one with the route. |
 | HTTP `413` | The request is larger than the limit. |
+| HTTP `408` | The body was not complete within `MCP_BODY_TIMEOUT_SECONDS`: a slow or stalled client. |
+| HTTP `415` | The body is compressed (`Content-Encoding`). Send it plain. |
+| A tool error `this service is busy` | Too many calls at once, in all or from your source. Behind a load balancer every client is one source: raise `MCP_MAX_IN_FLIGHT_PER_SOURCE`. |
 | HTTP `405` | A `GET` or `DELETE`. This service has no streams and no sessions; the client should use `POST` only. |
 | The front door asks the chatbot to sign in | `/mcp` is not let through ([the table above](#let-mcp-through-your-front-door)). |
 | The service will not start | `MCP_ALLOWED_HOSTS` or `API_BASE_URL` is missing or malformed; the log says which, and never prints a secret. |

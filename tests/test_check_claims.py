@@ -69,6 +69,9 @@ def page(
 
 
 def world(root: Path, **overrides) -> cc.Context:
+    for name, body in overrides.get("extra_files", {}).items():
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text(body, encoding="utf-8")
     (root / "docs").mkdir(exist_ok=True)
     (root / "tests").mkdir(exist_ok=True)
     (root / "server" / "tests").mkdir(parents=True, exist_ok=True)
@@ -284,6 +287,31 @@ def main() -> int:
                 workflow_text=SERVER_ONLY,
             )
         ),
+    )
+    # A helper pytest never collects is not evidence, however it is named (review L4).
+    for helper in ("harness.py", "conftest.py", "stack.py", "helpers_test_x.py"):
+        for tree in ("mcp", "server"):
+            check(
+                f"{tree}/tests/{helper} is not collected by pytest, so not evidence",
+                any(
+                    "collect" in p
+                    for p in problems_for(
+                        page(evidence=f"`{tree}/tests/{helper}::test_m`"),
+                        extra_files={f"{tree}/tests/{helper}": "def test_m(): pass\n"},
+                    )
+                ),
+            )
+    check(
+        "a file named test_*.py under mcp/tests is collected",
+        problems_for(page(evidence="`mcp/tests/test_m.py::test_m`")) == [],
+    )
+    check(
+        "so is one named *_test.py",
+        problems_for(
+            page(evidence="`mcp/tests/m_test.py::test_m`"),
+            extra_files={"mcp/tests/m_test.py": "def test_m(): pass\n"},
+        )
+        == [],
     )
     check(
         "a script suite with a pixi task CI runs is counted", problems_for(page()) == []

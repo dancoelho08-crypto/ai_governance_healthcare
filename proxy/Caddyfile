@@ -44,6 +44,18 @@
 	# has nothing to do with it, despite what the old comment here said.)
 	servers {
 		trusted_proxies static private_ranges
+
+		# Headers must arrive within 10 seconds of the connection. There is NO body
+		# deadline here, and there cannot be one: Go's ReadTimeout also cancels the
+		# context of a handler that is still running when it expires, which would end
+		# every /api/events stream, and it would bound the dashboard's largest write
+		# (2 MB over a slow link). So a client that trickles a body to /mcp holds its
+		# own connection to this proxy open, as it can on any route; the MCP service
+		# drops its side at its own deadline, and docs/mcp.md says the rest is for the
+		# front door or load balancer to bound.
+		timeouts {
+			read_header 10s
+		}
 	}
 }
 
@@ -82,6 +94,12 @@
 	}
 
 	encode zstd gzip
+
+	# X-Client-Address is the MCP route's own: the address THIS proxy observed, which the
+	# gate hands to the API as the source its rate limit and read trail use. No client
+	# may set it on any route, so it is removed here for every request, and the /mcp
+	# route sets it itself from the peer.
+	request_header -X-Client-Address
 
 	# -------------------------------------------------------------------------
 	# Security headers, at the SITE level so /api/* gets them too. They used to
@@ -405,8 +423,17 @@
 			request_header -X-Forwarded-Email
 			request_header -X-Forwarded-User
 			request_header -X-Forwarded-Preferred-Username
-			request_header -X-Client-Address
 			request_header -X-Proxy-Secret
+
+			# The source address is what this edge observed, never a claim: the
+			# forwarding headers a client may have sent are deleted (Caddy then writes its
+			# own X-Forwarded-For from the peer), and the gate is told the peer, the same
+			# value the agent route gives the API as X-Real-IP. Behind a load balancer the
+			# peer is the balancer, which docs/mcp.md says.
+			request_header -X-Forwarded-For
+			request_header -Forwarded
+			request_header -X-Real-IP
+			request_header X-Client-Address "{remote_host}"
 
 			# The token is a credential in a request: never cache the answer.
 			header Cache-Control "no-store"

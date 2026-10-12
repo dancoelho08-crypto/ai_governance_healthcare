@@ -79,7 +79,6 @@ MAIN: list[tuple[str, str, str, int]] = [
     ),
     ("an ALB header is not stripped", strip("X-Amzn-Oidc-Data"), "", 1),
     ("an Easy Auth header is not stripped", strip("X-Ms-Client-Principal-Name"), "", 1),
-    ("a client's X-Client-Address is not stripped", strip("X-Client-Address"), "", 1),
     ("a client's X-Proxy-Secret is not stripped", strip("X-Proxy-Secret"), "", 1),
     (
         "the proxy sets an identity on the mcp route",
@@ -108,6 +107,22 @@ MAIN: list[tuple[str, str, str, int]] = [
         "",
         1,
     ),
+    ("a client's X-Forwarded-For is not deleted", strip("X-Forwarded-For"), "", 1),
+    ("a client's Forwarded is not deleted", strip("Forwarded"), "", 1),
+    ("a client's X-Real-IP is not deleted", strip("X-Real-IP"), "", 1),
+    (
+        "X-Client-Address is not set from the peer",
+        '\t\t\trequest_header X-Client-Address "{remote_host}"\n',
+        "",
+        1,
+    ),
+    (
+        "X-Client-Address is set from a forwarding header",
+        '\t\t\trequest_header X-Client-Address "{remote_host}"\n',
+        "\t\t\trequest_header X-Client-Address "
+        '"{http.request.header.X-Forwarded-For}"\n',
+        1,
+    ),
     (
         "the default upstream is the main API",
         "{$MCP_UPSTREAM:mcp-gate:8082}",
@@ -117,10 +132,63 @@ MAIN: list[tuple[str, str, str, int]] = [
 ]
 # Applied to the whole file: the log's redaction is above the route.
 MAIN_FILE: list[tuple[str, str, str, int]] = [
+    (
+        "X-Client-Address is not stripped on every route",
+        "\trequest_header -X-Client-Address\n",
+        "",
+        1,
+    ),
     ("the log keeps the query of /mcp", MCP_LOG, AGENT_ONLY_LOG, 1),
 ]
 
+# Broken in the main file, and noticed by the timing checks only (they take a minute).
+TIMEOUTS_MAIN: list[tuple[str, str, str, int]] = [
+    (
+        "the proxy waits for ever for a service",
+        "\t\t\t\t\tresponse_header_timeout 30s\n",
+        "",
+        1,
+    ),
+    ("the proxy's header deadline is gone", "\t\t\tread_header 10s\n", "", 1),
+]
+TIMEOUTS_GATE: list[tuple[str, str, str, int]] = [
+    (
+        "the gate waits for ever for a service",
+        "\t\t\t\t\tresponse_header_timeout 30s\n",
+        "",
+        1,
+    ),
+    ("the gate's header deadline is gone", "\t\t\tread_header 10s\n", "", 1),
+]
+
 GATE: list[tuple[str, str, str, int]] = [
+    (
+        "the gate takes the address from a forwarding header",
+        "\t\t\treverse_proxy {$MCP_UPSTREAM:mcp:8000} {\n\t\t\t\tflush_interval -1\n",
+        "\t\t\treverse_proxy {$MCP_UPSTREAM:mcp:8000} {\n\t\t\t\tflush_interval -1\n"
+        '\t\t\t\theader_up X-Client-Address "{client_ip}"\n',
+        1,
+    ),
+    ("the gate does not delete a client's X-Real-IP", strip("X-Real-IP"), "", 1),
+    ("the gate does not delete a client's Forwarded", strip("Forwarded"), "", 1),
+    (
+        "the gate has no health route",
+        '\thandle /gate-health {\n\t\trespond "ok" 200\n\t}\n',
+        "",
+        1,
+    ),
+    (
+        "the gate has no body deadline",
+        "\t\t\tread_body 10s\n",
+        "",
+        1,
+    ),
+    (
+        "the API listener has no body cap",
+        "\t\trequest_body {\n\t\t\tmax_size 16KB\n\t\t}\n\n",
+        "",
+        1,
+    ),
     # --- :8081, the service to the API
     (
         "8081 forwards a write verb",
@@ -178,12 +246,6 @@ GATE: list[tuple[str, str, str, int]] = [
     ("8082 does not strip an ALB header", strip("X-Amzn-Oidc-Data"), "", 2),
     ("8082 passes a client's shared secret", strip("X-Proxy-Secret"), "", 1),
     (
-        "8082 lets the client choose its address",
-        '\t\t\t\theader_up X-Client-Address "{client_ip}"\n',
-        "",
-        1,
-    ),
-    (
         "8082 no longer refuses the rest",
         '\thandle {\n\t\trespond "Not found." 404\n\t}\n',
         "",
@@ -239,12 +301,14 @@ def main() -> int:
                 with contextlib.redirect_stdout(io.StringIO()):
                     if which == "main":
                         tp.check_mcp_route(workdir)
+                    elif which == "timeouts":
+                        tp.check_mcp_timeouts(workdir)
                     else:
                         tp.check_mcp_gate(workdir)
                 return list(tp.failures)
 
         print("The unbroken files")
-        for which in ("main", "gate"):
+        for which in ("main", "gate", "timeouts"):
             clean = run(main_text, gate_text, which)
             ok = not clean
             print(f"  {'PASS' if ok else 'FAIL'}  the {which} checks pass a real copy")
@@ -285,6 +349,28 @@ def main() -> int:
         # written in. What would break is the route reaching the sign-on handle, and
         # that is what the checks above (no identity set, nothing reaching /api/) are
         # for.
+
+        print("The timeouts, broken (these take a minute each)")
+        for name, old, new, nth in TIMEOUTS_MAIN:
+            mutated = replace_nth(main_text, old, new, nth)
+            if mutated is None:
+                print(f"  FAIL  {name}  <- the text to break is not in the Caddyfile")
+                failures += 1
+                continue
+            noticed = run(mutated, gate_text, "timeouts")
+            ok = bool(noticed)
+            print(f"  {'PASS' if ok else 'FAIL'}  {name} is noticed")
+            failures += 0 if ok else 1
+        for name, old, new, nth in TIMEOUTS_GATE:
+            mutated = replace_nth(gate_text, old, new, nth)
+            if mutated is None:
+                print(f"  FAIL  {name}  <- the text to break is not in the gate")
+                failures += 1
+                continue
+            noticed = run(main_text, mutated, "timeouts")
+            ok = bool(noticed)
+            print(f"  {'PASS' if ok else 'FAIL'}  {name} is noticed")
+            failures += 0 if ok else 1
 
         print("Each guard of the gate, broken")
         for name, old, new, nth in GATE:

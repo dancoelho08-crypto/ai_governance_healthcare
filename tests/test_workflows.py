@@ -138,6 +138,25 @@ def no_mcp_pytest(workflow: dict) -> list[str]:
     return problems
 
 
+def stack_suite_order(workflow: dict) -> list[str]:
+    """In the stack job the MCP suite runs before the end-to-end one, the order proved
+    by running both (each suite also clears the source's failure allowance it spends,
+    so neither depends on the other's leftovers). The order is pinned so a change to it
+    is a decision, and is proved again (#164 review H2)."""
+    runs = [s.get("run", "") for s in jobs(workflow).get("stack", {}).get("steps", [])]
+    at = {
+        name: next(
+            (i for i, r in enumerate(runs) if f"pixi run {name}" == r.strip()), -1
+        )
+        for name in ("test-stack-mcp", "test-stack")
+    }
+    if min(at.values()) < 0:
+        return ["the stack job does not run both test-stack-mcp and test-stack"]
+    if at["test-stack-mcp"] > at["test-stack"]:
+        return ["test-stack-mcp runs after test-stack: the order proved is MCP first"]
+    return []
+
+
 def skips_allowed(workflow: dict) -> list[str]:
     value = str((workflow.get("env") or {}).get(REQUIRE_VAR, ""))
     return (
@@ -279,6 +298,7 @@ def every_rule(
         *orphan_tests(tasks, files),
         *no_server_pytest(workflow),
         *no_mcp_pytest(workflow),
+        *stack_suite_order(workflow),
         *skips_allowed(workflow),
         *swallowed_failures(workflow),
         *missing_timeouts(workflow),
@@ -411,6 +431,17 @@ def main() -> int:
         if "mcp[dev]" not in s.get("run", "")
     ]
     check("the MCP package not installed is noticed", bool(no_mcp_pytest(broken)))
+
+    broken = copy.deepcopy(workflow)
+    steps = jobs(broken)["stack"]["steps"]
+    mcp_at = next(
+        i for i, x in enumerate(steps) if x.get("run") == "pixi run test-stack-mcp"
+    )
+    steps.append(steps.pop(mcp_at))
+    check(
+        "the MCP stack suite moved after the end-to-end one is noticed",
+        bool(stack_suite_order(broken)),
+    )
 
     broken = copy.deepcopy(workflow)
     jobs(broken)[AGGREGATE_JOB]["needs"].remove("stack")

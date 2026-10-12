@@ -14,7 +14,14 @@ DEFAULT_PORT = 8000
 # Every request body is a JSON-RPC message of a few hundred bytes.
 DEFAULT_MAX_BODY_BYTES = 64 * 1024
 DEFAULT_TIMEOUT_SECONDS = 10.0
-DEFAULT_MAX_IN_FLIGHT = 16
+# Calls answered at once, in all and from one source. A source is the address the proxy
+# itself observed, so behind a load balancer every client shares the balancer's.
+DEFAULT_MAX_IN_FLIGHT = 64
+DEFAULT_MAX_IN_FLIGHT_PER_SOURCE = 4
+# How long a call may wait for a free slot before it is refused as busy.
+DEFAULT_QUEUE_WAIT_SECONDS = 1.0
+# A request whose body is not complete by then is dropped with 408.
+DEFAULT_BODY_TIMEOUT_SECONDS = 10.0
 # The host names a request may carry whatever is configured: this machine, which is
 # what the container's own health check and a local test use.
 LOOPBACK_HOSTS = ("127.0.0.1:*", "localhost:*", "[::1]:*")
@@ -76,6 +83,9 @@ class Settings:
     max_body_bytes: int = DEFAULT_MAX_BODY_BYTES
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
     max_in_flight: int = DEFAULT_MAX_IN_FLIGHT
+    max_in_flight_per_source: int = DEFAULT_MAX_IN_FLIGHT_PER_SOURCE
+    queue_wait_seconds: float = DEFAULT_QUEUE_WAIT_SECONDS
+    body_timeout_seconds: float = DEFAULT_BODY_TIMEOUT_SECONDS
     hosts_with_loopback: tuple[str, ...] = field(init=False)
 
     def __post_init__(self) -> None:
@@ -114,5 +124,18 @@ class Settings:
             ),
             max_in_flight=int(
                 _positive(env, "MCP_MAX_IN_FLIGHT", DEFAULT_MAX_IN_FLIGHT)
+            ),
+            max_in_flight_per_source=int(
+                _positive(
+                    env,
+                    "MCP_MAX_IN_FLIGHT_PER_SOURCE",
+                    DEFAULT_MAX_IN_FLIGHT_PER_SOURCE,
+                )
+            ),
+            queue_wait_seconds=_positive(
+                env, "MCP_QUEUE_WAIT_SECONDS", DEFAULT_QUEUE_WAIT_SECONDS
+            ),
+            body_timeout_seconds=_positive(
+                env, "MCP_BODY_TIMEOUT_SECONDS", DEFAULT_BODY_TIMEOUT_SECONDS
             ),
         )

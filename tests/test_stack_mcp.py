@@ -316,6 +316,61 @@ def main() -> int:
     # (The proxy's session route: the dev identity answers, a bearer adds nothing.)
     check("a token is no way to anything but the agent routes", "token" not in body)
 
+    print("The caller's address is the edge's, never a claim")
+    # A valid call that lies about where it comes from: every header a client could use.
+    lies = {
+        "X-Forwarded-For": "203.0.113.250",
+        "X-Real-IP": "203.0.113.251",
+        "X-Client-Address": "203.0.113.252",
+        "Forwarded": "for=203.0.113.253",
+    }
+    status, result = call(token, "whoami", **lies)
+    check("a valid call with forged address headers is still answered", status == 200)
+    rows = compose(
+        "exec", "-T", "db", "psql", "-U", "chai", "-d", "chai", "-tA", "-c",
+        "SELECT DISTINCT source_ip FROM access_event "
+        f"WHERE token_id = '{minted['id']}'",
+    ).stdout.split()  # fmt: skip
+    api_log = compose("logs", "--no-color", "--no-log-prefix", "api").stdout
+    check(
+        "a valid call's source in the read trail is the peer, not a claim",
+        bool(rows)
+        and not [r for r in rows if r.startswith("203.0.113.")]
+        and "203.0.113.25" not in api_log,
+        f"{rows}",
+    )
+
+    print("Trickled bodies")
+    # A body started and never finished, through the proxy and the gate to the service.
+    # Caddy holds the client's own connection as it does on every route (a global body
+    # deadline would also end /api/events streams, so there is none), and docs/mcp.md
+    # says so. What is bounded is the service: it gives up on the body after its
+    # deadline and frees what it held, which its own log shows.
+    import socket
+
+    host, port = BASE.split("//", 1)[1].split(":")
+    began = time.monotonic()
+    with socket.create_connection((host, int(port)), timeout=40) as conn:
+        conn.sendall(
+            (
+                f"POST /mcp HTTP/1.1\r\nHost: {host}:{port}\r\n"
+                "Content-Type: application/json\r\nContent-Length: 98\r\n"
+                f"Authorization: Bearer {token}\r\n\r\n{{"
+            ).encode()
+        )
+        dropped = False
+        while time.monotonic() - began < 25 and not dropped:
+            time.sleep(2)
+            logged = compose(
+                "--profile", "agent-mcp", "logs", "--no-color", "mcp"
+            ).stdout
+            dropped = "POST /mcp 408" in logged
+    check(
+        "a body trickled to /mcp through the proxy is dropped by the service",
+        dropped and time.monotonic() - began < 25,
+        f"no 408 in the service's log after {time.monotonic() - began:.0f}s",
+    )
+
     print("Isolation")
     facts = {}
     for cid in containers():
@@ -429,6 +484,45 @@ for host, port in (("mcp-gate", 8081), ("api", 8000), ("proxy", 80), ("db", 5432
             for a in ("agent_me", "agent_portfolio", "agent_project")
         ),
         rows,
+    )
+
+    print("A flood of wrong tokens, whatever the address headers say")
+    # Last of the checks that need a working source: this spends the source's failure
+    # allowance, as the direct route's flood does (test_stack.py).
+    messages = []
+    for i in range(100):
+        shaped = f"agt_{i + 1000:016x}." + "A" * 43
+        _, result = call(
+            shaped,
+            "whoami",
+            **{
+                "X-Forwarded-For": f"203.0.113.{i % 250}",
+                "X-Real-IP": f"203.0.113.{(i + 1) % 250}",
+                "X-Client-Address": f"203.0.113.{(i + 2) % 250}",
+                "Forwarded": f"for=203.0.113.{(i + 3) % 250}",
+            },
+        )
+        messages.append(json.dumps(result))
+    rejected = sum(REJECTED in m for m in messages)
+    limited = sum("too many requests" in m for m in messages)
+    check(
+        "rotated forwarding headers still end in 429, like the direct route",
+        rejected <= 31 and limited >= 60,
+        f"rejected {rejected}, limited {limited}",
+    )
+    # Leave the source as found: the failure allowance is a window, and the next suite
+    # (test_stack.py) must not find it spent. Probe until a wrong token is answered
+    # as wrong again, not as limited.
+    for _ in range(24):
+        _, probe = call(wrong, "whoami")
+        if "too many requests" not in json.dumps(probe):
+            break
+        time.sleep(5)
+    status, result = call(token, "whoami")
+    check(
+        "and a working token from the same source is still served",
+        status == 200 and not result.get("isError"),
+        str(result)[:150],
     )
 
     print("Turning it off again")

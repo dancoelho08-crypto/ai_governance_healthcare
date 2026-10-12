@@ -316,7 +316,13 @@ start with the profile: `mcp`, alone on an internal network, and `mcp-gate`, a
 small Caddy that is the only thing `mcp` can reach and the only thing the
 proxy's `/mcp` route talks to. The proxy's `/mcp` route skips the sign-on like
 the agent API's, deletes every identity header and sets none; with the profile
-off it answers `502`. Sending answers to a model is a disclosure only the
+off it answers `502`. `mcp-gate` is **inside the trust boundary** like the
+proxy: it
+holds `PROXY_SHARED_SECRET` and sits on `edge`, so a compromised gate can forge
+an
+identity to the API ([why that is judged acceptable](mcp.md#the-trust-boundary-and-what-it-costs);
+if it is not, leave the profile off). Sending answers to a model is a disclosure
+only the
 operator can decide: read [the MCP page](mcp.md#should-you-turn-it-on) first.
 
 ### How the containers are locked down

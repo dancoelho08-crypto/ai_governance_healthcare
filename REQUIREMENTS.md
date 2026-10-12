@@ -1455,7 +1455,11 @@ honest answer and is a gap worth closing; see R-19.
       identity header and sets none, and forwards only the transport's methods on
       exactly that path. Host and Origin are validated (DNS rebinding), no CORS
       header is sent, and the request body, the time and the calls in flight are
-      bounded.
+      bounded. `mcp-gate` is inside the trust boundary like the proxy (it holds
+      the
+      API's shared secret and sits on `edge`), and the documentation says so. The
+      source address the API limits and audits is the one the proxy itself
+      observed, never a client's claim.
     - **Client-agnostic, and no model or client bundled.** The documentation shows
       how to point any MCP-capable client at it and at an OpenAI-compatible
       endpoint. No client code ships and no client is endorsed. Which model reads

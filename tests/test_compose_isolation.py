@@ -538,7 +538,9 @@ def mcp_image_is_unprivileged(dockerfile: str) -> list[str]:
     if "--require-hashes" not in dockerfile:
         problems.append("the lock is not verified by hash")
     if "pip uninstall" not in dockerfile:
-        problems.append("pip stays in the runtime image")
+        problems.append("pip stays in the venv")
+    if not re.search(r"^RUN rm -rf .*?/usr/local/bin/pip", dockerfile, re.M | re.S):
+        problems.append("the base image's own pip stays in the runtime image")
     if not re.search(r"^HEALTHCHECK ", dockerfile, re.M):
         problems.append("no HEALTHCHECK")
     cmd = re.findall(r"^CMD (.*)$", dockerfile, re.M)
@@ -546,6 +548,29 @@ def mcp_image_is_unprivileged(dockerfile: str) -> list[str]:
         problems.append("CMD is not in exec form (a shell would run it)")
     if re.search(r"^CMD .*\bsh\b", dockerfile, re.M):
         problems.append("CMD runs a shell")
+    return problems
+
+
+def mcp_gate_is_inside_the_trust_boundary_and_says_so(
+    compose: dict, text: str
+) -> list[str]:
+    """The gate holds the API's secret and sits on `edge` with it, so it is part of the
+    trust boundary, and compose.yaml must say so (review M1), and it has a health check
+    (review L8)."""
+    gate = service(compose, MCP_GATE)
+    problems = []
+    if EDGE not in _nets(gate):
+        problems.append("the gate is not on edge, so this rule's premise has changed")
+    if "PROXY_SHARED_SECRET" not in (gate.get("environment") or {}):
+        problems.append("the gate does not hold the shared secret")
+    if "THIS SERVICE IS INSIDE THE TRUST BOUNDARY" not in text:
+        problems.append(
+            "compose.yaml does not say the gate is inside the trust boundary"
+        )
+    if "plus, ONLY if the optional" not in text:
+        problems.append("the header still says the only other member of edge is proxy")
+    if not (gate.get("healthcheck") or {}).get("test"):
+        problems.append("the gate has no healthcheck")
     return problems
 
 
@@ -609,6 +634,9 @@ def every_rule(compose: dict) -> list[str]:
         *mcp_has_a_network_of_its_own(compose),
         *mcp_holds_no_credential(compose),
         *mcp_is_hardened(compose),
+        *mcp_gate_is_inside_the_trust_boundary_and_says_so(
+            compose, COMPOSE.read_text(encoding="utf-8")
+        ),
         *mcp_image_is_unprivileged(
             (ROOT / "mcp" / "Dockerfile").read_text(encoding="utf-8")
         ),
@@ -1059,6 +1087,37 @@ def main() -> int:
         lambda c: s_(c)[MCP].pop("security_opt"),
     )
 
+    text = COMPOSE.read_text(encoding="utf-8")
+    check(
+        "mcp-gate holds the secret and sits on edge, and says so",
+        not mcp_gate_is_inside_the_trust_boundary_and_says_so(compose, text),
+    )
+    for label, old, new in (
+        (
+            "the trust-boundary sentence removed",
+            "THIS SERVICE IS INSIDE THE TRUST BOUNDARY",
+            "THIS SERVICE IS FINE",
+        ),
+        (
+            "the header claiming proxy is the only other edge member",
+            "plus, ONLY if the optional",
+            "and nothing else, so no optional",
+        ),
+    ):
+        check(
+            f"{label} is noticed",
+            bool(
+                mcp_gate_is_inside_the_trust_boundary_and_says_so(
+                    compose, text.replace(old, new)
+                )
+            ),
+        )
+    mcp_mutation(
+        "the gate without a healthcheck",
+        lambda c: mcp_gate_is_inside_the_trust_boundary_and_says_so(c, text),
+        lambda c: s_(c)[MCP_GATE].pop("healthcheck"),
+    )
+
     real_mcp = (ROOT / "mcp" / "Dockerfile").read_text(encoding="utf-8")
     check(
         "the mcp image: the real Dockerfile passes",
@@ -1070,6 +1129,11 @@ def main() -> int:
         ("a login shell", "--shell /usr/sbin/nologin", "--shell /bin/bash"),
         ("an unlocked install", "--require-hashes", ""),
         ("keeping pip", "&& /opt/venv/bin/pip uninstall --yes pip setuptools", ""),
+        (
+            "keeping the base image's pip",
+            "RUN rm -rf /usr/local/bin/pip",
+            "RUN echo /usr/local/bin/pip",
+        ),
         ("a floating base image", "python:3.12-slim@sha256:", "python:3.12-slim#"),
         ("no health check", "HEALTHCHECK", "# HEALTHCHECK"),
         (

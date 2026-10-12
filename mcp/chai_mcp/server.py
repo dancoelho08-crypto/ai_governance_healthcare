@@ -11,9 +11,11 @@ fail on anything not on the allowlist.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import ipaddress
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import date
 from enum import StrEnum
 from functools import wraps
@@ -25,14 +27,27 @@ from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from .bearer import bearer_token
+from .bearer import bearer_token, is_token_shaped
 from .config import Settings
-from .models import KEY, PERSON, PROJECT, WORD, WORD_MAX, Portfolio, Project, Whoami
+from .models import (
+    ID_MAX,
+    KEY,
+    PERSON,
+    PROJECT,
+    WORD,
+    WORD_MAX,
+    Portfolio,
+    Project,
+    Whoami,
+)
 from .upstream import Message, Route, ToolFailure, Upstream
 
 log = logging.getLogger("chai.mcp")
 
 R = TypeVar("R")
+
+# The source of a call that arrived with no address the proxy could vouch for.
+UNKNOWN_SOURCE = "unknown"
 
 
 class ToolName(StrEnum):
@@ -85,35 +100,79 @@ def transport_security(settings: Settings) -> TransportSecuritySettings:
     )
 
 
-class InFlight:
-    """A bound on calls answered at once. Over it a call is refused, not queued."""
-
+class _Source:
     def __init__(self, limit: int) -> None:
-        self._limit = limit
-        self._active = 0
+        self.sem = asyncio.Semaphore(limit)
+        self.users = 0
 
-    def __enter__(self) -> None:
-        if self._active >= self._limit:
-            raise ToolFailure(Message.BUSY.value)
-        self._active += 1
 
-    def __exit__(self, *_: object) -> None:
-        self._active -= 1
+class Slots:
+    """A bound on calls answered at once, in all and from one source.
+
+    A call waits a short, bounded time for a slot and is then refused as busy. The
+    per-source bound is what stops one caller taking every slot; the source is the
+    address the proxy itself observed (never one the caller chose). A caller with no
+    address shares one source with every other.
+    """
+
+    def __init__(self, total: int, per_source: int, wait: float) -> None:
+        self._total = asyncio.Semaphore(total)
+        self._per_source = per_source
+        self._wait = wait
+        self._sources: dict[str, _Source] = {}
+
+    @contextlib.asynccontextmanager
+    async def slot(self, source: str) -> AsyncIterator[None]:
+        entry = self._sources.get(source)
+        if entry is None:
+            entry = self._sources[source] = _Source(self._per_source)
+        entry.users += 1
+        got_source = got_total = False
+        try:
+            try:
+                async with asyncio.timeout(self._wait):
+                    await entry.sem.acquire()
+                    got_source = True
+                    await self._total.acquire()
+                    got_total = True
+            except TimeoutError:
+                raise ToolFailure(Message.BUSY.value) from None
+            yield
+        finally:
+            if got_total:
+                self._total.release()
+            if got_source:
+                entry.sem.release()
+            entry.users -= 1
+            if entry.users == 0:
+                self._sources.pop(source, None)
+
+    @property
+    def sources(self) -> int:
+        return len(self._sources)
 
 
 def bearer_of(ctx: Context) -> str:
     """This request's own Authorization header, as ``Bearer <token>``. Read from the
-    request that carries the call, so a call can never use another caller's."""
+    request that carries the call, so a call can never use another caller's.
+
+    Only a credential shaped like a token the API mints gets any further: anything else
+    is the one rejected message, with no slot taken and no request made.
+    """
     request = ctx.request_context.request
     token = bearer_token(request.headers.get("authorization") if request else None)
     if token is None:
         raise ToolFailure(Message.NO_TOKEN.value)
+    if not is_token_shaped(token):
+        raise ToolFailure(Message.REJECTED.value)
     return f"Bearer {token}"
 
 
 def client_address_of(ctx: Context) -> str | None:
-    """The caller's address as the gate reported it, when it is an IP address.
-    Used only so the API's per-source limit counts the caller and not this service."""
+    """The caller's address as the proxy reported it (``X-Client-Address``, which the
+    proxy sets from the peer it itself saw and the gate passes on), when it is an IP
+    address. Used only so the API's per-source limit counts the caller and not this
+    service, and for the per-source slots. No other header is read."""
     request = ctx.request_context.request
     raw = (request.headers.get("x-client-address") if request is not None else "") or ""
     try:
@@ -144,7 +203,11 @@ def build_server(
     settings: Settings, upstream: Upstream | None = None
 ) -> tuple[FastMCP, Upstream]:
     upstream = upstream or Upstream(settings)
-    busy = InFlight(settings.max_in_flight)
+    slots = Slots(
+        settings.max_in_flight,
+        settings.max_in_flight_per_source,
+        settings.queue_wait_seconds,
+    )
     mcp = FastMCP(
         name="governance-readonly",
         instructions=INSTRUCTIONS,
@@ -168,12 +231,10 @@ def build_server(
     )
     @_guarded
     async def whoami(ctx: Context) -> Whoami:
-        with busy:
+        authorization, source = bearer_of(ctx), client_address_of(ctx)
+        async with slots.slot(source or UNKNOWN_SOURCE):
             return await upstream.get(
-                Route.ME,
-                Whoami,
-                authorization=bearer_of(ctx),
-                client_address=client_address_of(ctx),
+                Route.ME, Whoami, authorization=authorization, client_address=source
             )
 
     @mcp.tool(
@@ -249,7 +310,7 @@ def build_server(
             str | None,
             Field(
                 pattern=KEY,
-                max_length=64,
+                max_length=ID_MAX,
                 description="Only projects whose record follows this framework id.",
             ),
         ] = None,
@@ -275,13 +336,14 @@ def build_server(
             }.items()
             if v is not None
         }
-        with busy:
+        authorization, source = bearer_of(ctx), client_address_of(ctx)
+        async with slots.slot(source or UNKNOWN_SOURCE):
             return await upstream.get(
                 Route.PORTFOLIO,
                 Portfolio,
-                authorization=bearer_of(ctx),
+                authorization=authorization,
                 params=params,
-                client_address=client_address_of(ctx),
+                client_address=source,
             )
 
     @mcp.tool(
@@ -306,13 +368,14 @@ def build_server(
             ),
         ],
     ) -> Project:
-        with busy:
+        authorization, source = bearer_of(ctx), client_address_of(ctx)
+        async with slots.slot(source or UNKNOWN_SOURCE):
             return await upstream.get(
                 Route.PROJECT,
                 Project,
-                authorization=bearer_of(ctx),
+                authorization=authorization,
                 suffix=ref,
-                client_address=client_address_of(ctx),
+                client_address=source,
             )
 
     return mcp, upstream
