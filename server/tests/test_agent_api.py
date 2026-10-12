@@ -1966,6 +1966,87 @@ async def test_a_token_sent_in_a_url_is_refused_and_not_logged_by_the_server(
     assert token.split(".", 1)[1] not in "\n".join(seen)
 
 
+REDACTED_SPELLINGS = [
+    "/api/./agent/me?token=QV11",
+    "/api/x/../agent/me?token=QV12",
+    "//api/agent/me?token=QV13",
+    "/api/%61gent/me?token=QV14",
+    "/api/Agent/ME?token=QV15",
+    "/api/agent?token=QV16",
+    "http://localhost/api/agent/me?token=QV17",
+    "/api/./me?token=QV18",
+    "/api/me?token=QV19&who=agent",
+]
+
+
+def test_the_access_log_redacts_every_spelling_the_proxy_does() -> None:
+    """The same rule as proxy/Caddyfile's log (the word "agent" in any case, a
+    percent-encoded character, an absolute-form target, a doubled slash, a dot or empty
+    segment, or the word in the query), because the API's own log can be reached by a
+    spelling that path-prefix matching misses (L5)."""
+    from app.securitylog import RedactAgentQuery
+
+    def line(target: str) -> str:
+        record = logging.LogRecord(
+            "uvicorn.access", logging.INFO, "", 0,
+            '%s - "%s %s HTTP/%s" %d', ("1.2.3.4:5", "GET", target, "1.1", 401), None,
+        )  # fmt: skip
+        assert RedactAgentQuery().filter(record)
+        return record.getMessage()
+
+    for target in REDACTED_SPELLINGS:
+        assert "QV1" not in line(target), target
+        assert "?[redacted]" in line(target), target
+    # An ordinary route's query is still logged.
+    assert "?status=met" in line("/api/projects?status=met")
+    assert "?visible=1" in line("/api/me?visible=1")
+
+
+async def test_a_token_in_a_dot_segment_url_is_not_logged_by_a_real_uvicorn(
+    settings,
+) -> None:
+    """Raw requests (nothing cleans the target), through uvicorn with its access log
+    on: none of the spellings leaves its query in the log."""
+    import asyncio
+
+    import uvicorn
+
+    app = create_app(settings)
+    server = uvicorn.Server(
+        uvicorn.Config(app, host="127.0.0.1", port=0, log_level="info", lifespan="on")
+    )
+    seen: list[str] = []
+
+    class Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            seen.append(record.getMessage())
+
+    handler = Capture()
+    serving = asyncio.create_task(server.serve())
+    for _ in range(200):
+        if server.started:
+            break
+        await asyncio.sleep(0.05)
+    logging.getLogger("uvicorn.access").addHandler(handler)
+    try:
+        port = server.servers[0].sockets[0].getsockname()[1]
+        for target in REDACTED_SPELLINGS:
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            writer.write(
+                f"GET {target} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n".encode()
+            )
+            await writer.drain()
+            await reader.read()
+            writer.close()
+    finally:
+        logging.getLogger("uvicorn.access").removeHandler(handler)
+        server.should_exit = True
+        await serving
+    text = "\n".join(seen)
+    assert len(seen) >= len(REDACTED_SPELLINGS) - 2, seen
+    assert "QV1" not in text, text
+
+
 async def _mint_over_http(port: int) -> dict:
     async with AsyncClient(
         base_url=f"http://127.0.0.1:{port}", headers=TEST_HEADERS

@@ -20,8 +20,22 @@ updates:
     ignore:
       - dependency-name: pydantic-core
 
+  # The optional MCP service (#164): its own lock and its own image.
+  - package-ecosystem: pip
+    directory: /mcp
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: pydantic-core
+
   - package-ecosystem: docker
     directory: /server
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /mcp
     schedule:
       interval: weekly
 

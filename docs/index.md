@@ -182,3 +182,4 @@ applied model card preview, the OPTICA adoption review, and creating a project.
 | The privacy officer, DPO or records officer | [Privacy and retention](privacy.md) |
 | Comparing the frameworks | [The frameworks](frameworks/index.md) and the [crosswalk](crosswalk.md) |
 | A developer | [Developing it](developing.md) and [Python exports](exports.md) |
+| Connecting a chatbot, or an assistant that reads the register | [The agent API](agent-api.md) and [the MCP server](mcp.md) |

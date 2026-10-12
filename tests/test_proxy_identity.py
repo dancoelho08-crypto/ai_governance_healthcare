@@ -72,6 +72,9 @@ EDGE_BODY_CAP = 2_000_000
 
 ROOT = Path(__file__).resolve().parent.parent
 CADDYFILE = ROOT / "proxy" / "Caddyfile"
+# The MCP service's gate (#164): its own Caddyfile, a second Caddy of the `agent-mcp`
+# profile. The mutation test (tests/test_proxy_mcp_mutations.py) points this at a copy.
+GATE = ROOT / "proxy" / "Caddyfile.mcp-gate"
 # Overridable so two runs on one machine (two worktrees, a developer and CI's
 # neighbor) do not collide on the port, the network or the container names.
 PORT = int(os.environ.get("PROXY_TEST_PORT", "18099"))
@@ -156,7 +159,8 @@ FRONT_DOORS = [
 # body bytes it managed to read for each request, which is what the body-cap
 # check needs. /_seen returns that log and is not itself recorded.
 ECHO = """
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import time
 import json
 SEEN = []
 class H(BaseHTTPRequestHandler):
@@ -181,6 +185,7 @@ class H(BaseHTTPRequestHandler):
                          "truncated": truncated})
             if truncated:
                 return
+            time.sleep(float(self.headers.get("X-Echo-Delay") or 0))
             body = json.dumps(dict(self.headers)).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -189,8 +194,12 @@ class H(BaseHTTPRequestHandler):
         self.wfile.write(body)
     do_GET = respond
     do_POST = respond
+    do_DELETE = respond
+    do_PUT = respond
+    do_PATCH = respond
+    do_OPTIONS = respond
     def log_message(self, *a): pass
-HTTPServer(("0.0.0.0", 8000), H).serve_forever()
+ThreadingHTTPServer(("0.0.0.0", 8000), H).serve_forever()
 """
 
 failures: list[str] = []
@@ -216,6 +225,8 @@ def request(
     *,
     method: str = "GET",
     body: bytes | None = None,
+    port: int | None = None,
+    timeout: float = 30,
 ) -> tuple[int, str, dict[str, str]]:
     """Return (status, body, response headers lowercased) for one request.
 
@@ -223,10 +234,13 @@ def request(
     Caddy puts on the response rather than what it forwards.
     """
     req = urllib.request.Request(
-        f"http://127.0.0.1:{PORT}{path}", headers=headers, method=method, data=body
+        f"http://127.0.0.1:{port or PORT}{path}",
+        headers=headers,
+        method=method,
+        data=body,
     )
     try:
-        with urllib.request.urlopen(req, timeout=30) as response:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
             got = response.read().decode()
             status, raw = response.status, response.headers
     except urllib.error.HTTPError as exc:
@@ -653,6 +667,602 @@ def check_agent_route(workdir: Path) -> None:
     )
 
 
+# --- the MCP route (#164, R-73, D-91) -------------------------------------------------
+
+MCP_BODY_CAP = 64_000  # `max_size 64KB` in proxy/Caddyfile, SI units like the API's cap
+MCP_HEADERS = {
+    **BEARER,
+    "Content-Type": "application/json",
+    "Host": "mcp.example.test",
+    "Origin": "https://chat.example.test",
+}
+FORGED_IDENTITY = {h: "forged@evil.example" for h in IDENTITY_HEADERS}
+
+
+def echo_seen() -> list[dict]:
+    """Every request the echo upstream has served, read from inside its container, so it
+    works whichever listener the request came in on. It may still be starting."""
+    for _ in range(40):
+        done = docker(
+            "exec",
+            ECHO_NAME,
+            "python",
+            "-c",
+            "import urllib.request;"
+            "print(urllib.request.urlopen('http://127.0.0.1:8000/_seen').read().decode())",
+        )
+        if done.returncode == 0 and done.stdout.strip():
+            return json.loads(done.stdout)
+        time.sleep(0.5)
+    raise RuntimeError("the echo upstream did not answer")
+
+
+def check_mcp_route(workdir: Path) -> None:
+    """The optional MCP service's route in proxy/Caddyfile (#164).
+
+    It is the second place a request gets past single sign-on, so the same four ways
+    it could quietly become a hole are checked, each against a real Caddy:
+
+    1. only POST, GET and DELETE on exactly /mcp are forwarded; any other method, and
+       any other path under the prefix, is answered here with a 404 and goes no further;
+    2. every header that could be read as "who is this" is stripped, so is the secret
+       the API checks, and the proxy sets none, even with a front door configured;
+    3. what is forwarded is what the service needs, unchanged: the bearer, the Host
+       (the service validates it), the Origin (the service validates it);
+    4. with the profile off (nothing at the upstream) the answer is a 502 and nothing
+       else on the proxy changes.
+    """
+    door = FRONT_DOORS[3]
+    signed_in = door[2]
+    start_caddy(
+        workdir,
+        {
+            **door[1],
+            "PROXY_SHARED_SECRET": "mcp-must-never-see-this",
+            # The echo upstream stands in for the gate: the one thing that answers.
+            "MCP_UPSTREAM": "api:8000",
+        },
+    )
+    body = b'{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+    # The address THIS proxy observes, as the agent route gives it to the API.
+    _, ref_body, _ = request("/api/agent/me", BEARER)
+    # The echo has served every earlier check too: count only what this one adds.
+    earlier = len(echo_seen())
+    peer = {k.lower(): v for k, v in json.loads(ref_body).items()}.get("x-real-ip")
+    sent = {
+        **MCP_HEADERS,
+        **FORGED_IDENTITY,
+        "X-Client-Address": "6.6.6.6",
+        "X-Proxy-Secret": "chosen-by-the-client",
+        "X-Forwarded-For": "203.0.113.250",
+        "X-Real-IP": "203.0.113.251",
+        "Forwarded": "for=203.0.113.252",
+    }
+    status, got_body, resp = request("/mcp", sent, method="POST", body=body)
+    check("mcp route: forwarded with no sign-on", status == 200, f"HTTP {status}")
+    got = (
+        {k.lower(): v for k, v in json.loads(got_body).items()} if status == 200 else {}
+    )
+    check(
+        "mcp route: the bearer reaches the service unchanged",
+        got.get("authorization") == BEARER["Authorization"],
+    )
+    check(
+        "mcp route: the Host is the one the client used",
+        got.get("host") == "mcp.example.test",
+    )
+    check(
+        "mcp route: the Origin is passed on for the service to judge",
+        got.get("origin") == "https://chat.example.test",
+    )
+    for name in (*IDENTITY_HEADERS, "X-Proxy-Secret"):
+        check(
+            f"mcp route: a client's {name} is stripped",
+            name.lower() not in got,
+            f"{name}={got.get(name.lower())!r}",
+        )
+    # The address the API will rate-limit and audit is what this edge observed, never a
+    # claim (review H1): every header a client could use to claim one is deleted, and
+    # X-Client-Address is set from the peer, the same value the agent route uses.
+    check(
+        "mcp route: X-Client-Address is the peer this proxy observed",
+        bool(peer) and got.get("x-client-address") == peer,
+        f"got {got.get('x-client-address')!r}, the peer is {peer!r}",
+    )
+    claims = ("203.0.113.250", "203.0.113.251", "203.0.113.252", "6.6.6.6")
+    check(
+        "mcp route: no forwarding claim a client made reaches the service",
+        not [c for c in claims if c in json.dumps(got)],
+        str([c for c in claims if c in json.dumps(got)]),
+    )
+    check(
+        "mcp route: a client's X-Real-IP and Forwarded are deleted",
+        "x-real-ip" not in got and "forwarded" not in got,
+    )
+    for rotating in ("203.0.113.10", "203.0.113.11", "203.0.113.12"):
+        _, again, _ = request(
+            "/mcp",
+            {**MCP_HEADERS, "X-Forwarded-For": rotating, "X-Client-Address": rotating},
+            method="POST",
+            body=body,
+        )
+        check(
+            f"mcp route: rotating the claimed address ({rotating}) changes nothing",
+            {k.lower(): v for k, v in json.loads(again).items()}.get("x-client-address")
+            == peer,
+        )
+    for method in ("GET", "DELETE"):
+        status, _, _ = request("/mcp", MCP_HEADERS, method=method)
+        check(
+            f"mcp route: {method} is forwarded (the service answers it)", status == 200
+        )
+    for method in ("PUT", "PATCH", "OPTIONS"):
+        status, text, _ = request("/mcp", MCP_HEADERS, method=method, body=b"{}")
+        check(
+            f"mcp route: {method} is refused by the proxy",
+            status == 404 and text == "Not found.",
+            f"HTTP {status} {text[:30]!r}",
+        )
+    for path in ("/mcp/", "/mcp/x", "/mcpx", "/MCP/x", "/mcp/sse", "/mcp.json"):
+        status, text, _ = request(path, MCP_HEADERS, method="POST", body=body)
+        check(
+            f"mcp route: {path} is not forwarded",
+            status == 404 and text == "Not found.",
+            f"HTTP {status} {text[:30]!r}",
+        )
+    for path in ("/mcp/../api/me", "/mcp/%2e%2e/api/me", "/mcp%2f..%2fapi/me"):
+        status, _, _ = request(path, MCP_HEADERS, method="POST", body=body)
+        check(
+            f"mcp route: {path} gets no further than the sign-on handle",
+            status in (401, 404),
+            f"HTTP {status}",
+        )
+    forwarded = [
+        (r["method"], r["path"])
+        for r in echo_seen()[earlier:]
+        if r["path"].startswith("/mcp")
+    ]
+    check(
+        "mcp route: the service saw exactly the three allowed requests",
+        forwarded == [("POST", "/mcp")] * 4 + [("GET", "/mcp"), ("DELETE", "/mcp")],
+        str(forwarded),
+    )
+    check(
+        "mcp route: nothing reached the main API through it",
+        not [r for r in echo_seen()[earlier:] if r["path"].startswith("/api/")],
+    )
+
+    # X-Client-Address is no client's on ANY route: it is removed for every request.
+    for path, headers in (
+        ("/api/agent/me", BEARER),
+        ("/api/me", signed_in),
+        ("/api/projects", signed_in),
+    ):
+        _, other, _ = request(path, {**headers, "X-Client-Address": "6.6.6.6"})
+        check(
+            f"X-Client-Address is stripped on {path}",
+            "x-client-address" not in {k.lower() for k in json.loads(other)},
+        )
+    check(
+        "the proxy sets no identity on the mcp route, with a front door configured",
+        not [k for k in got if k.startswith("x-auth-request")],
+        str([k for k in got if k.startswith("x-auth-request")]),
+    )
+    check(
+        "mcp route: the answer is not cacheable",
+        resp.get("cache-control") == "no-store",
+        f"got {resp.get('cache-control')!r}",
+    )
+    check(
+        "mcp route: the proxy's secret is not given to the service",
+        "mcp-must-never-see-this" not in got_body,
+    )
+    # The security headers are the site's, and this route gets them too.
+    for name, want in EXPECTED_HEADERS.items():
+        check(f"mcp route: {name}", resp.get(name) == want, f"got {resp.get(name)!r}")
+
+    # The body is capped at the edge, as the API's is.
+    under = request("/mcp", MCP_HEADERS, method="POST", body=b"a" * 4096)[0]
+    over = request(
+        "/mcp", MCP_HEADERS, method="POST", body=b"a" * (MCP_BODY_CAP + 4096)
+    )[0]
+    check("mcp route: a body under the cap is forwarded", under == 200, f"HTTP {under}")
+    check("mcp route: a body over the cap is refused", over == 413, f"HTTP {over}")
+
+    # Everything else on the proxy is as it was.
+    status, _ = get("/api/me", {})
+    check("an anonymous /api/me is still refused", status == 401, f"HTTP {status}")
+    status, text = get("/", {})
+    check("the dashboard is still served", status == 200 and text == "app")
+    status, _, _ = request("/api/agent-tokens", {}, method="POST", body=b"{}")
+    check("an anonymous token mint is still refused", status == 401, f"HTTP {status}")
+
+    # A token in a URL is refused by the service; the proxy must not log it either,
+    # and Caddy already redacts the Authorization header.
+    request("/mcp?token=LEAKMCP111&x=1", MCP_HEADERS, method="POST", body=body)
+    request("/mcp?access_token=LEAKMCP222", MCP_HEADERS, method="POST", body=body)
+    request("/MCP?api_key=LEAKMCP333", MCP_HEADERS, method="POST", body=body)
+    request("/api/me?visible=KEEPSAFE444", signed_in)
+    time.sleep(1)
+    logs = docker("logs", CADDY)
+    text = logs.stdout + logs.stderr
+    for secret in ("LEAKMCP111", "LEAKMCP222", "LEAKMCP333"):
+        check(f"the proxy's log keeps no query of /mcp ({secret})", secret not in text)
+    check(
+        "the proxy's log keeps no bearer token",
+        BEARER["Authorization"].split(" ")[1] not in text,
+    )
+    check("every other route's log line is as it was", "visible=KEEPSAFE444" in text)
+
+    # Profile off: nothing answers where the gate would be. The route exists and says
+    # so (502); the rest of the proxy is untouched, and nothing leaks to the API.
+    for label, env in (
+        ("the default upstream", {}),
+        ("an upstream that is down", {"MCP_UPSTREAM": "nowhere.invalid:1"}),
+    ):
+        start_caddy(workdir, {**door[1], **env})
+        earlier = len(echo_seen())
+        status, _, _ = request("/mcp", MCP_HEADERS, method="POST", body=body)
+        check(
+            f"mcp route: with {label}, POST /mcp is a 502",
+            status == 502,
+            f"HTTP {status}",
+        )
+        status, _, _ = request("/mcp", MCP_HEADERS, method="GET")
+        check(
+            f"mcp route: with {label}, GET /mcp is a 502",
+            status == 502,
+            f"HTTP {status}",
+        )
+        check(
+            f"mcp route: with {label}, nothing reached the main API",
+            len(echo_seen()) == earlier,
+        )
+        status, text = get("/api/me", signed_in)
+        check(f"with {label}, the rest of the proxy is as it was", status == 200)
+
+
+def raw_exchange_bytes(port: int, data: bytes, *, wait: float) -> bytes:
+    """Send bytes and read until the peer answers or closes, or ``wait`` passes."""
+    import socket
+
+    with socket.create_connection(("127.0.0.1", port), timeout=wait) as conn:
+        conn.sendall(data)
+        conn.settimeout(wait)
+        try:
+            return conn.recv(65536)
+        except OSError:
+            return b""
+
+
+def check_mcp_timeouts(workdir: Path) -> None:
+    """A slow service is answered with an error after the response-header timeout
+    (30 seconds) on the route and on the gate's listener, not held for ever."""
+    door = FRONT_DOORS[3]
+    start_caddy(workdir, {**door[1], "MCP_UPSTREAM": "api:8000"})
+    began = time.monotonic()
+    status, _, _ = request(
+        "/mcp",
+        {**MCP_HEADERS, "X-Echo-Delay": "38"},
+        method="POST",
+        body=b"{}",
+        timeout=60,
+    )
+    took = time.monotonic() - began
+    check(
+        "mcp route: a service that does not answer in 30 seconds is an error",
+        status in (502, 504) and took < 36,
+        f"HTTP {status} after {took:.0f}s",
+    )
+    # Headers that never finish arriving are dropped (read_header, 10 seconds).
+    import socket
+
+    def header_trickle(port: int) -> float:
+        began = time.monotonic()
+        with socket.create_connection(("127.0.0.1", port), timeout=30) as conn:
+            conn.sendall(b"POST /mcp HTTP/1.1\r\nHost: x\r\nX-Slow: ")
+            conn.settimeout(20)
+            with contextlib.suppress(OSError):
+                conn.recv(4096)
+        return time.monotonic() - began
+
+    took = header_trickle(PORT)
+    check(
+        "mcp route: headers that never finish arriving are dropped",
+        took < 16,
+        f"still open after {took:.0f}s",
+    )
+    start_gate(workdir, {"PROXY_SHARED_SECRET": "x", "MCP_UPSTREAM": "api:8000"})
+    for label, port in (("the service's", PORT + 1), ("the API's", PORT)):
+        took = header_trickle(port)
+        check(
+            f"gate: headers that never finish arriving are dropped on {label} listener",
+            took < 16,
+            f"still open after {took:.0f}s",
+        )
+    began = time.monotonic()
+    status, _, _ = request(
+        "/mcp",
+        {**MCP_HEADERS, "X-Echo-Delay": "38"},
+        method="POST",
+        body=b"{}",
+        port=PORT + 1,
+        timeout=60,
+    )
+    took = time.monotonic() - began
+    check(
+        "gate: a service that does not answer in 30 seconds is an error",
+        status in (502, 504) and took < 36,
+        f"HTTP {status} after {took:.0f}s",
+    )
+
+
+def start_gate(workdir: Path, env: dict[str, str]) -> None:
+    """The MCP gate (proxy/Caddyfile.mcp-gate): :8081 on PORT and :8082 on PORT+1."""
+    docker("rm", "-f", CADDY)
+    args = [
+        "run",
+        "-d",
+        "--name",
+        CADDY,
+        "--network",
+        NET,
+        "-p",
+        f"{PORT}:8081",
+        "-p",
+        f"{PORT + 1}:8082",
+        "-v",
+        f"{GATE}:/etc/caddy/Caddyfile:ro",
+    ]
+    for key, value in env.items():
+        args += ["-e", f"{key}={value}"]
+    args.append("caddy:2")
+    docker(*args)
+    for _ in range(40):
+        try:
+            request("/", {}, port=PORT)
+            request("/", {}, port=PORT + 1)
+            return
+        except Exception:
+            time.sleep(0.5)
+    raise RuntimeError("the MCP gate did not come up")
+
+
+def check_mcp_gate(workdir: Path) -> None:
+    """The MCP gate (#164): the service's only two doors, each as narrow as it looks.
+
+    :8081 (service to API) forwards the three GET routes and nothing else, with the
+    caller's token untouched, the caller's address as the API's source, and the shared
+    secret the service never holds. :8082 (proxy to service) forwards the transport's
+    three methods on /mcp and nothing else, and sets the caller's address itself.
+    """
+    secret = "gate/secret+value="
+    earlier = len(echo_seen())
+    start_gate(
+        workdir,
+        {
+            "PROXY_SHARED_SECRET": secret,
+            # The echo upstream stands in for the service, and also for the API.
+            "MCP_UPSTREAM": "api:8000",
+        },
+    )
+    out, inn = PORT, PORT + 1
+
+    def seen(_port: int) -> list[dict]:
+        return echo_seen()
+
+    # --- :8081, the service's way to the agent API ---------------------------------
+    sent = {
+        **BEARER,
+        **FORGED_IDENTITY,
+        "X-Client-Address": "203.0.113.9",
+        "X-Proxy-Secret": "chosen-by-the-service",
+        "Cookie": "session=abc",
+    }
+    for path in (
+        "/api/agent/me",
+        "/api/agent/portfolio?status=notmet&limit=5",
+        "/api/agent/projects/pr_" + "a" * 32,
+    ):
+        status, text, resp = request(path, sent, port=out)
+        got = (
+            {k.lower(): v for k, v in json.loads(text).items()} if status == 200 else {}
+        )
+        label = path.split("?")[0]
+        check(f"gate: GET {label} is forwarded", status == 200, f"HTTP {status}")
+        check(
+            f"gate: {label}: the caller's bearer reaches the API unchanged",
+            got.get("authorization") == BEARER["Authorization"],
+        )
+        check(
+            f"gate: {label}: no identity header reaches the API",
+            not [h for h in IDENTITY_HEADERS if h.lower() in got],
+        )
+        check(
+            f"gate: {label}: the secret is the gate's, not the sender's",
+            got.get("x-proxy-secret") == secret,
+            f"got {got.get('x-proxy-secret')!r}",
+        )
+        check(
+            f"gate: {label}: the caller's address becomes the API's source",
+            got.get("x-real-ip") == "203.0.113.9",
+            f"got {got.get('x-real-ip')!r}",
+        )
+        check(
+            f"gate: {label}: the answer is not cacheable",
+            resp.get("cache-control") == "no-store",
+        )
+    status, text, _ = request("/api/agent/me", BEARER, port=out)
+    got = {k.lower(): v for k, v in json.loads(text).items()}
+    check(
+        "gate: with no address reported the API's source header is empty, not invented",
+        got.get("x-real-ip", "") == "",
+        f"got {got.get('x-real-ip')!r}",
+    )
+    before = len(seen(out))
+    for method in ("POST", "DELETE", "PUT", "PATCH"):
+        status, text, _ = request(
+            "/api/agent/me", BEARER, method=method, port=out, body=b"{}"
+        )
+        check(
+            f"gate: {method} on an agent route is refused",
+            status == 404 and text == "Not found.",
+            f"HTTP {status}",
+        )
+    for path in (
+        "/api/projects",
+        "/api/projects/x",
+        "/api/me",
+        "/api/agent-tokens",
+        "/api/agent/",
+        "/api/agent/anything",
+        "/api/agent/projects",
+        "/api/events",
+        "/api/health",
+        "/",
+        "/mcp",
+    ):
+        status, text, _ = request(path, BEARER, port=out)
+        check(
+            f"gate: GET {path} is not forwarded to the API",
+            status == 404 and text == "Not found.",
+            f"HTTP {status} {text[:30]!r}",
+        )
+    check(
+        "gate: none of those reached the API",
+        len(seen(out)) == before,
+        f"{len(seen(out)) - before} extra request(s)",
+    )
+
+    # The container's own health check, and a body cap on the agent routes' listener.
+    status, text, _ = request("/gate-health", {}, port=out)
+    check("gate: its health route answers", status == 200 and text == "ok", f"{status}")
+    status, _, _ = request(
+        "/api/agent/me",
+        {**BEARER, "Content-Type": "text/plain"},
+        port=out,
+        body=b"a" * 20_000,
+    )
+    check(
+        "gate: a body over the agent listener's cap is refused",
+        status == 413,
+        f"{status}",
+    )
+
+    # --- :8082, the proxy's way to the service -------------------------------------
+    sent = {
+        **MCP_HEADERS,
+        **FORGED_IDENTITY,
+        "X-Client-Address": "6.6.6.6",
+        "X-Proxy-Secret": "chosen-by-the-client",
+        "X-Forwarded-For": "198.51.100.7",
+        "X-Real-IP": "198.51.100.8",
+        "Forwarded": "for=198.51.100.9",
+    }
+    status, text, resp = request("/mcp", sent, method="POST", body=b"{}", port=inn)
+    got = {k.lower(): v for k, v in json.loads(text).items()} if status == 200 else {}
+    check(
+        "gate: POST /mcp is forwarded to the service", status == 200, f"HTTP {status}"
+    )
+    check(
+        "gate: the bearer reaches the service unchanged",
+        got.get("authorization") == BEARER["Authorization"],
+    )
+    check(
+        "gate: no identity header and no secret reaches the service",
+        not [h for h in (*IDENTITY_HEADERS, "X-Proxy-Secret") if h.lower() in got],
+        str([h for h in (*IDENTITY_HEADERS, "X-Proxy-Secret") if h.lower() in got]),
+    )
+    # The gate takes the address from the proxy as it is, and never from a forwarding
+    # header (review H1): a forged X-Forwarded-For changes nothing.
+    check(
+        "gate: X-Client-Address is passed on as the proxy set it",
+        got.get("x-client-address") == "6.6.6.6",
+        f"got {got.get('x-client-address')!r}",
+    )
+    check(
+        "gate: a forwarded-for claim never becomes the address",
+        not [
+            c
+            for c in ("198.51.100.7", "198.51.100.8", "198.51.100.9")
+            if c in json.dumps(got)
+        ]
+        and "x-real-ip" not in got
+        and "forwarded" not in got,
+        json.dumps(got)[:200],
+    )
+    check("gate: the answer is not cacheable", resp.get("cache-control") == "no-store")
+    for method in ("GET", "DELETE"):
+        status, _, _ = request("/mcp", MCP_HEADERS, method=method, port=inn)
+        check(f"gate: {method} /mcp is forwarded", status == 200, f"HTTP {status}")
+    for method in ("PUT", "PATCH", "OPTIONS"):
+        status, text, _ = request(
+            "/mcp", MCP_HEADERS, method=method, port=inn, body=b"{}"
+        )
+        check(
+            f"gate: {method} /mcp is refused",
+            status == 404 and text == "Not found.",
+            f"HTTP {status}",
+        )
+    for path in ("/mcp/", "/mcp/x", "/api/agent/me", "/api/projects", "/api/me", "/"):
+        status, text, _ = request(
+            path, MCP_HEADERS, method="POST", port=inn, body=b"{}"
+        )
+        check(
+            f"gate: {path} is not forwarded to the service",
+            status == 404 and text == "Not found.",
+            f"HTTP {status}",
+        )
+    paths = [
+        (r["method"], r["path"])
+        for r in seen(out)[earlier:]
+        if r["path"].startswith("/mcp")
+    ]
+    check(
+        "gate: the service saw only the allowed requests on /mcp",
+        paths == [("POST", "/mcp"), ("GET", "/mcp"), ("DELETE", "/mcp")],
+        str(paths),
+    )
+
+    over = request(
+        "/mcp", MCP_HEADERS, method="POST", port=inn, body=b"a" * (MCP_BODY_CAP + 4096)
+    )[0]
+    check("gate: a body over the cap is refused", over == 413, f"HTTP {over}")
+    # A body that is started and never finished is cut off by the gate (review M3). The
+    # echo upstream waits for the rest of it, so what shows the gate gave up is the
+    # upstream's connection being torn down (a truncated body) once the gate's
+    # `read_body` (10 seconds) passes, and not 30 seconds later.
+    import socket
+
+    for label, port, path in (
+        ("the service's listener", inn, "/mcp"),
+        ("the API's listener", out, "/api/agent/me"),
+    ):
+        method = "POST" if port == inn else "GET"
+        before = len(echo_seen())
+        with socket.create_connection(("127.0.0.1", port), timeout=30) as conn:
+            conn.sendall(
+                f"{method} {path} HTTP/1.1\r\nHost: x\r\nContent-Length: 98\r\n"
+                f"Authorization: {BEARER['Authorization']}\r\n\r\n{{".encode()
+            )
+            time.sleep(16)
+            cut = [r for r in echo_seen()[before:] if r["path"] == path]
+        check(
+            f"gate: a body trickled forever is cut off on {label}",
+            bool(cut) and cut[-1]["truncated"],
+            f"upstream saw {cut}",
+        )
+
+    # The log keeps no query string and no token.
+    request("/api/agent/me?token=LEAKGATE1", BEARER, port=out)
+    request("/mcp?token=LEAKGATE2", MCP_HEADERS, method="POST", port=inn, body=b"{}")
+    time.sleep(1)
+    logs = docker("logs", CADDY)
+    text = logs.stdout + logs.stderr
+    for leaked in ("LEAKGATE1", "LEAKGATE2", BEARER["Authorization"].split(" ")[1]):
+        check(f"gate: its log keeps no {leaked[:10]}...", leaked not in text)
+
+
 def docker_usable() -> bool:
     return bool(shutil.which("docker")) and docker("info").returncode == 0
 
@@ -795,6 +1405,11 @@ def run_checks(workdir: Path) -> None:
 
     # The agent API's route: no single sign-on, read-only, never an identity (#164).
     check_agent_route(workdir)
+
+    # The optional MCP service's route and its gate (#164, R-73, D-91).
+    check_mcp_route(workdir)
+    check_mcp_gate(workdir)
+    check_mcp_timeouts(workdir)
 
 
 if __name__ == "__main__":

@@ -26,7 +26,7 @@ POSTGRES_DB   ?= chai
 HTTP_PORT     ?= 8080
 
 .DEFAULT_GOAL := help
-.PHONY: help env preflight doctor up dev down logs ps config build-app shell psql backup backup-plaintext restore reapply-purges dispose agent-tokens verify-backup subject-access phi-scan prune check-isolation lock
+.PHONY: help env preflight doctor up dev down logs ps config build-app shell psql backup backup-plaintext restore reapply-purges dispose agent-tokens verify-backup subject-access phi-scan prune check-isolation lock lock-mcp
 
 help:  ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -71,14 +71,14 @@ dev: env  ## Development stack: fixed dev identity, hot reload, exposed ports
 	 IDENTITY_ID_SOURCE="$${ID:-dev@localhost}" \
 	 $(DEV) up
 
-down:  ## Stop and remove containers. The pgdata volume SURVIVES this.
-	$(COMPOSE) down
+down:  ## Stop and remove containers (the MCP profile's too). The pgdata volume SURVIVES this.
+	$(COMPOSE) --profile agent-mcp down
 
-logs:  ## Follow logs for all services
-	$(COMPOSE) logs -f --tail=100
+logs:  ## Follow logs for all services (the MCP profile's too, if running)
+	$(COMPOSE) --profile agent-mcp logs -f --tail=100
 
-ps:  ## Show service status and health
-	$(COMPOSE) ps
+ps:  ## Show service status and health (the MCP profile's too, if running)
+	$(COMPOSE) --profile agent-mcp ps
 
 config:  ## Render the merged production config (what actually runs)
 	$(COMPOSE) config
@@ -201,6 +201,11 @@ lock:  ## Regenerate server/requirements.txt (hash-pinned) from server/pyproject
 	docker run --rm -v "$(CURDIR)/server:/work" -w /work python:3.12-slim sh -c \
 	  "pip install -q pip-tools==7.6.2 && pip-compile --quiet --generate-hashes --strip-extras --output-file=requirements.txt pyproject.toml && chown \$$(stat -c %u:%g pyproject.toml) requirements.txt"
 
+# The optional MCP service's lock, the same way (#164).
+lock-mcp:  ## Regenerate mcp/requirements.txt (hash-pinned) from mcp/pyproject.toml
+	docker run --rm -v "$(CURDIR)/mcp:/work" -w /work python:3.12-slim sh -c \
+	  "pip install -q pip-tools==7.6.2 && pip-compile --quiet --generate-hashes --strip-extras --output-file=requirements.txt pyproject.toml && chown \$$(stat -c %u:%g pyproject.toml) requirements.txt"
+
 # A backup that has never been restored is a hypothesis (#52). This restores one into a
 # throwaway PostgreSQL (same major version as production, no network) and checks the
 # tables, the rows and the append-only triggers survived. Default: the newest dump.
@@ -216,4 +221,4 @@ check-isolation:  ## Prove the API is not reachable except through the proxy
 prune:  ## Remove containers AND the database volume. Destroys all data.
 	@printf 'This deletes the pgdata volume permanently. Type YES to continue: ' \
 	  && read ans && [ "$$ans" = YES ] || { echo aborted; exit 1; }
-	$(COMPOSE) down -v
+	$(COMPOSE) --profile agent-mcp down -v

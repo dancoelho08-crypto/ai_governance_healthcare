@@ -26,6 +26,7 @@ select = [
 # meaningful -- an outer server fixture around an inner subscription -- and
 # flattening it obscures which context owns what.
 "server/tests/*" = ["B008", "SIM117", "E501"]
+"mcp/tests/*" = ["B008", "SIM117", "E501"]
 
 [format]
 docstring-code-format = true

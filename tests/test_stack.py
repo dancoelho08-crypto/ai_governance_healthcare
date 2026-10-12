@@ -27,7 +27,8 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-BASE = "http://localhost:8080"
+# STACK_URL lets two stacks on one machine (two worktrees) use different ports.
+BASE = os.environ.get("STACK_URL", "http://localhost:8080")
 
 # CI sets REQUIRE_TESTS=1. A suite that cannot run then FAILS instead of
 # skipping, because a skip exits 0 and reads as a pass: that is how CI once
@@ -570,6 +571,13 @@ def main() -> int:
             status == 200 and "projects" in json.loads(body),
             f"{status} {body[:200]}",
         )
+        # A suite that ran before this one (the MCP suite floods wrong tokens) may have
+        # spent this source's failure allowance, which is a per-source window and not
+        # this test's to find broken: wait it out, then run the checks that fail a call.
+        for _ in range(24):
+            if as_agent("/api/agent/me", "agt_" + "1" * 16 + "." + "A" * 43)[0] != 429:
+                break
+            time.sleep(5)
         bad_status, bad_body = as_agent(
             "/api/agent/me", "agt_" + "0" * 16 + "." + "A" * 43
         )
@@ -675,8 +683,12 @@ def main() -> int:
                 "chai",
                 "-tA",
                 "-c",
+                # Only rows a flood token could have written (its ids start with 13
+                # zeros and no such token exists). A refusal of anyone else's token,
+                # which the MCP suite leaves (a project not visible), is not this
+                # flood's.
                 "SELECT count(*) FROM access_event WHERE action = 'agent_refused' "
-                f"AND token_id <> '{minted['id']}'",
+                "AND token_id LIKE '0000000000000%'",
             ],
             capture_output=True,
             text=True,

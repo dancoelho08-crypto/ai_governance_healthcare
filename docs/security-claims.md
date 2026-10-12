@@ -1666,7 +1666,8 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
   only a call whose token verified spends it, so nobody can spend another token's
   allowance by naming it. A failed call is counted against its source, which is the
   socket peer (or the proxy-reported address only inside `TRUSTED_PROXY_CIDR`),
-  never a header a client can rotate.
+  never a header a client can rotate. Through `/mcp` the source is the peer the
+  proxy itself observed, never a client's `X-Forwarded-For` (C-139).
 - **Asserted in:** `docs/agent-api.md` — "A working token** may make 60 calls per 60 seconds (`AGENT_RATE_LIMIT_MAX_REQUESTS`), lower than the limit a person at the dashboard has (240)."
 - **Status:** enforced
 - **Enforced by:**
@@ -1674,6 +1675,9 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
   `server/tests/test_agent_api.py::test_the_source_is_the_peer_and_not_a_header_a_client_chooses`
   `server/tests/test_agent_api.py::test_the_default_agent_limit_is_lower_than_the_default_session_limit`
   `server/tests/test_agent_mutations.py::test_each_guard_is_noticed_when_broken`
+  `tests/test_proxy_identity.py::mcp route: X-Client-Address is the peer this proxy observed`
+  `tests/test_proxy_identity.py::mcp route: rotating the claimed address`
+  `tests/test_stack_mcp.py::rotated forwarding headers still end in 429, like the direct route`
 
 ### C-111 The agent API has no write route
 
@@ -1779,6 +1783,9 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
   `server/tests/test_agent_api.py::test_the_source_is_always_an_address_or_unknown`
   `server/tests/test_agent_api.py::test_uvicorn_is_started_without_proxy_headers_and_that_matters`
   `server/tests/test_agent_mutations.py::test_each_guard_is_noticed_when_broken`
+  `tests/test_proxy_identity.py::mcp route: X-Client-Address is the peer this proxy observed`
+  `tests/test_proxy_identity.py::mcp route: rotating the claimed address`
+  `tests/test_stack_mcp.py::rotated forwarding headers still end in 429, like the direct route`
 
 ### C-116 A weak secret for the opaque ids is refused at startup
 
@@ -1868,3 +1875,350 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
   `tests/test_agent_access.py::no button in the browser-only copy`
   `tests/test_agent_access.py::and opening it does nothing`
   `tests/test_agent_access.py::Mutations of the built page are each noticed`
+
+### C-123 The MCP service is off unless its profile is asked for
+
+- **Claim:** A plain `docker compose up` starts neither the MCP service nor its
+  gate; only `--profile agent-mcp` does. With the profile off, the proxy's `/mcp`
+  answers `502` and nothing it reaches is the main API.
+- **Asserted in:** `docs/mcp.md` — "The MCP server is **off by default**."
+- **Asserted in:** `docs/mcp.md` — "A plain `docker compose up -d` does not start it"
+- **Asserted in:** `compose.yaml` — "OFF BY DEFAULT: both services below are in the"
+- **Asserted in:** `proxy/Caddyfile` — "OFF BY DEFAULT. The upstream is the `mcp-gate` service"
+- **Status:** enforced
+- **Enforced by:**
+  `tests/test_compose_isolation.py::the mcp service without its profile (on by default)`
+  `tests/test_compose_isolation.py::the gate without its profile`
+  `tests/test_compose_isolation.py::a new service with no profile`
+  `tests/test_compose_isolation.py::compose itself: a bare`
+  `tests/test_stack_mcp.py::no mcp or mcp-gate container is running`
+  `tests/test_stack_mcp.py::the proxy's /mcp is a 502 with nothing behind it`
+  `tests/test_proxy_identity.py::mcp route: with {label}, POST /mcp is a 502`
+
+### C-124 The MCP service holds no credential of its own
+
+- **Claim:** The MCP service is given no token, secret, password or key: none in
+  its environment, no env file, no way to the database, and no setting that could
+  hold a token. The API's shared secret is the gate's, never the service's.
+- **Asserted in:** `docs/mcp.md` — "It stores no token, and has none of its own."
+- **Status:** enforced
+- **Enforced by:**
+  `tests/test_compose_isolation.py::given to mcp`
+  `tests/test_compose_isolation.py::mcp with an env file`
+  `tests/test_compose_isolation.py::the gate without the shared secret`
+  `mcp/tests/test_mcp_service.py::test_nothing_in_the_settings_can_hold_a_token`
+  `mcp/tests/test_mcp_service.py::test_a_token_is_not_kept_after_its_request`
+  `mcp/tests/test_mcp_mutations.py::test_each_guard_is_noticed_when_broken`
+
+### C-125 A token is forwarded for one request and is in no log, error or result
+
+- **Claim:** Each request's own bearer token is forwarded, for that request only, to
+  the agent API's routes. It is stored nowhere and is in no log line of the MCP
+  service, in no error message and in no tool result, and a redirect is never
+  followed with it.
+- **Asserted in:** `docs/mcp.md` — "It reads the `Authorization` header of each request, forwards it for that request, validates what comes back, and answers."
+- **Asserted in:** `docs/mcp.md` — "never a header, a query string or a body, and so never a token."
+- **Status:** enforced
+- **Enforced by:**
+  `mcp/tests/test_mcp_service.py::test_each_tool_returns_its_documented_result_and_forwards_the_callers_token`
+  `mcp/tests/test_mcp_service.py::test_only_the_bearer_is_forwarded_no_identity_and_no_other_credential`
+  `mcp/tests/test_mcp_service.py::test_a_redirect_is_not_followed_so_the_token_goes_nowhere_else`
+  `mcp/tests/test_mcp_service.py::test_a_token_the_api_rejects_is_one_message_and_is_never_echoed`
+  `mcp/tests/test_mcp_service.py::test_the_token_is_in_no_log_line_on_any_path`
+  `mcp/tests/test_mcp_service.py::test_a_token_is_not_kept_after_its_request`
+  `mcp/tests/test_mcp_process.py::test_what_the_process_writes_holds_no_token`
+  `tests/test_stack_mcp.py::the token's secret is in no log of the proxy, gate, service or API`
+  `mcp/tests/test_mcp_mutations.py::test_each_guard_is_noticed_when_broken`
+  `mcp/tests/test_mcp_abuse.py::test_a_hostile_request_cannot_write_a_line_or_a_marker_into_the_log`
+
+### C-126 The MCP tools are exactly three read-only ones
+
+- **Claim:** The service registers `whoami`, `list_portfolio` and `get_project` and
+  nothing else: no write tool, no resource, no prompt and no tool that takes a URL
+  or a path. Each tool is one call to one of the agent API's three `GET` routes, and
+  no tool can reach another route.
+- **Asserted in:** `docs/mcp.md` — "There is no write tool, no resource, no prompt, and no tool that takes a URL or a path."
+- **Status:** enforced
+- **Enforced by:**
+  `mcp/tests/test_mcp_service.py::test_only_the_three_allowlisted_tools_are_registered`
+  `mcp/tests/test_mcp_service.py::test_no_resource_template_or_prompt_is_registered`
+  `mcp/tests/test_mcp_service.py::test_the_protocol_lists_exactly_the_allowlist`
+  `mcp/tests/test_mcp_service.py::test_every_tool_is_read_only_typed_and_says_how_to_read_it`
+  `mcp/tests/test_mcp_service.py::test_the_upstream_routes_are_the_three_get_routes_and_no_others`
+  `mcp/tests/test_mcp_service.py::test_a_call_asks_for_a_reference_it_can_name_and_nothing_else`
+  `mcp/tests/test_mcp_service.py::test_no_tool_can_reach_any_route_but_the_three`
+  `mcp/tests/test_mcp_contract.py::test_the_routes_are_the_apis_three_get_routes`
+  `mcp/tests/test_mcp_mutations.py::test_each_guard_is_noticed_when_broken`
+  `tests/test_stack_mcp.py::tools/list is exactly the three read-only tools`
+
+### C-127 No free text, name or email reaches a model through the MCP server
+
+- **Claim:** Text planted in a stored record, in every field and as an item, project
+  or checkpoint key, is in no tool result and no error: not a name, an email, a
+  sentence of instructions or markup. What is returned is the framework's own words,
+  opaque ids and dates.
+- **Asserted in:** `docs/mcp.md` — "**No free text is returned in this version**"
+- **Status:** enforced
+- **Enforced by:**
+  `mcp/tests/test_mcp_integration.py::test_hostile_text_planted_in_a_stored_record_never_reaches_a_model`
+  `mcp/tests/test_mcp_service.py::test_a_value_that_is_not_a_vocabulary_word_never_reaches_a_model`
+  `tests/test_stack_mcp.py::hostile text planted in the record is in no answer`
+  `server/tests/test_agent_api.py::test_nothing_hostile_planted_anywhere_reaches_an_agent`
+
+### C-128 The service checks every answer's shape a second time, and says what that cannot do
+
+- **Claim:** Every string the service passes on must be shaped like an id (one token
+  of at most 32 characters, no space, no run of five digits), a status or decision
+  (one to three plain words of letters, at most 32 characters), an opaque id or a
+  date, and an unknown field is refused, so a sentence of four or more words, an
+  address, markup or a word with digits in it makes the whole answer refused. Any
+  short phrase of one to three plain words passes: the shape cannot tell `Jane Doe`
+  from a decision, so this is a second wall behind the API's list of the build's own
+  words, and the page says so.
+- **Asserted in:** `docs/mcp.md` — "This is a shape filter, not a list of words"
+- **Status:** partial
+- **Enforced by:**
+  `mcp/tests/test_mcp_service.py::test_a_value_that_is_not_a_vocabulary_word_never_reaches_a_model`
+  `mcp/tests/test_mcp_service.py::test_an_answer_that_is_not_the_documented_shape_is_refused_whole`
+  `mcp/tests/test_mcp_service.py::test_a_name_that_is_shaped_like_a_word_is_the_apis_to_stop`
+  `mcp/tests/test_mcp_contract.py::test_the_api_and_this_service_agree_on_what_a_vocabulary_word_looks_like`
+  `mcp/tests/test_mcp_contract.py::test_the_second_wall_refuses_what_the_reviewer_got_through`
+- **Gap:** a short phrase of one to three plain words, a name included, passes the
+  shape check by design; the API's vocabulary allowlist (C-113) is the wall that
+  stops it. A custom framework whose words are longer or have digits or
+  punctuation would be refused whole (D-91 default (d)). (#164)
+
+### C-129 A failure is a fixed message, never the token or the upstream's body
+
+- **Claim:** Every failure the service reports is one of a few fixed messages. The
+  token and the upstream's response body are in none of them; a 422's message is cut
+  to plain characters, and an unexpected failure inside the service says only that it
+  could not complete.
+- **Asserted in:** `docs/mcp.md` — "A failure is a tool error (`isError` is `true`) with one of a few **fixed** messages."
+- **Status:** enforced
+- **Enforced by:**
+  `mcp/tests/test_mcp_service.py::test_a_failure_is_a_fixed_message_and_never_the_upstream_body`
+  `mcp/tests/test_mcp_service.py::test_a_token_the_api_rejects_is_one_message_and_is_never_echoed`
+  `mcp/tests/test_mcp_service.py::test_a_422_carries_the_apis_message_cut_to_plain_text`
+  `mcp/tests/test_mcp_service.py::test_a_429_says_when_to_retry`
+  `mcp/tests/test_mcp_service.py::test_an_unexpected_failure_inside_the_service_is_one_plain_message`
+  `mcp/tests/test_mcp_integration.py::test_a_token_that_is_wrong_in_any_way_gets_the_one_message`
+  `mcp/tests/test_mcp_docs.py::test_the_error_table_is_every_message_the_service_can_say`
+
+### C-130 The Host and Origin are validated, and no CORS header is sent
+
+- **Claim:** A request whose `Host` is not on the operator's list is refused, so is
+  one carrying an `Origin` that is not listed (the list is empty by default), both
+  before the token is looked at, and no CORS header is ever sent. The service will
+  not start without a host list.
+- **Asserted in:** `docs/mcp.md` — "a request whose `Host` header is not on the list is refused with a `421`."
+- **Asserted in:** `docs/mcp.md` — "No CORS header is ever sent."
+- **Status:** enforced
+- **Enforced by:**
+  `mcp/tests/test_mcp_service.py::test_a_request_for_another_host_is_refused`
+  `mcp/tests/test_mcp_service.py::test_a_browser_origin_that_is_not_listed_is_refused_even_with_a_token`
+  `mcp/tests/test_mcp_service.py::test_with_no_origins_configured_no_browser_origin_gets_through`
+  `mcp/tests/test_mcp_service.py::test_origin_is_checked_before_the_token`
+  `mcp/tests/test_mcp_service.py::test_no_cors_headers_are_ever_sent_and_a_preflight_is_not_served`
+  `mcp/tests/test_mcp_process.py::test_it_refuses_to_start_with_no_allowed_host`
+  `tests/test_stack_mcp.py::a foreign browser Origin is refused`
+  `tests/test_stack_mcp.py::a foreign Host is refused`
+
+### C-131 The proxy's /mcp route skips sign-on, strips every identity header and sets none
+
+- **Claim:** `/mcp` bypasses single sign-on, deletes every header that could be read
+  as an identity (and `X-Client-Address` and `X-Proxy-Secret`) and sets none, even
+  with a front door configured, forwards only `POST`, `GET` and `DELETE` on exactly
+  `/mcp`, caps the body, refuses everything else under the prefix with a `404`, and
+  never reaches the main API. It deletes every forwarding
+  header a client sent and sets `X-Client-Address` from the peer it observed.
+- **Asserted in:** `docs/mcp.md` — "deletes every identity header and sets none, forwards only the transport's three methods on exactly `/mcp`, and answers anything else under the prefix with a `404`."
+- **Asserted in:** `proxy/Caddyfile` — "this block never SETS an identity and STRIPS"
+- **Status:** enforced
+- **Enforced by:**
+  `tests/test_proxy_identity.py::mcp route: forwarded with no sign-on`
+  `tests/test_proxy_identity.py::the proxy sets no identity on the mcp route, with a front door configured`
+  `tests/test_proxy_identity.py::mcp route: the service saw exactly the three allowed requests`
+  `tests/test_proxy_identity.py::mcp route: nothing reached the main API through it`
+  `tests/test_proxy_identity.py::mcp route: a body over the cap is refused`
+  `tests/test_proxy_mcp_mutations.py`
+  `tests/test_proxy_identity.py::mcp route: X-Client-Address is the peer this proxy observed`
+
+### C-132 The MCP service can reach the gate and nothing else
+
+- **Claim:** `mcp` is on the internal `agent` network with `mcp-gate` and no other
+  network, publishes no port, and from inside it the API, the proxy and the database
+  cannot be reached.
+- **Asserted in:** `docs/mcp.md` — "so it cannot reach the API, the database, or the proxy's single sign-on listener."
+- **Status:** enforced
+- **Enforced by:**
+  `tests/test_compose_isolation.py::mcp on the edge network`
+  `tests/test_compose_isolation.py::the proxy on the agent network`
+  `tests/test_compose_isolation.py::the agent network made routable`
+  `tests/test_compose_isolation.py::a stranger on the agent network`
+  `tests/test_compose_isolation.py::a published port on mcp`
+  `tests/test_stack_mcp.py::from inside mcp only the gate is reachable (not the API, proxy or database)`
+  `tests/test_stack_mcp.py::mcp is on the agent network and nothing else`
+
+### C-133 The gate serves only the three GET routes and the MCP path, and holds the API's secret
+
+- **Claim:** `mcp-gate` forwards only the three agent `GET` routes to the API and
+  only `/mcp` to the service (and answers its own static health route), deletes
+  every identity header and sets none, passes the caller's token untouched, passes
+  the proxy's `X-Client-Address` on as the proxy set it and never reads a
+  forwarding header or trusts a proxy list, sets the shared secret from its own
+  environment, caps the body and drops a body that does not finish, and refuses
+  everything else.
+- **Asserted in:** `proxy/Caddyfile.mcp-gate` — "This file has no sign-on, no identity, and sets no identity header"
+- **Status:** enforced
+- **Enforced by:**
+  `tests/test_proxy_identity.py::gate: the answer is not cacheable`
+  `tests/test_proxy_identity.py::gate: none of those reached the API`
+  `tests/test_proxy_identity.py::gate: the service saw only the allowed requests on /mcp`
+  `tests/test_proxy_identity.py::gate: no identity header and no secret reaches the service`
+  `tests/test_proxy_identity.py::gate: X-Client-Address is passed on as the proxy set it`
+  `tests/test_proxy_identity.py::gate: a forwarded-for claim never becomes the address`
+  `tests/test_proxy_identity.py::gate: a body trickled forever is cut off on`
+  `tests/test_proxy_identity.py::gate: a body over the agent listener's cap is refused`
+  `tests/test_proxy_mcp_mutations.py`
+
+### C-134 The MCP image is non-root, locked and pinned, and its containers are hardened
+
+- **Claim:** The image installs only from a hash-verified lock with no pip, from
+  digest-pinned bases, runs as a numeric non-root user with no login shell and a
+  health check, is started directly and not through a shell, and its containers have
+  a read-only root filesystem, no capability, no new privileges and no published port.
+- **Asserted in:** `mcp/Dockerfile` — "Non-root, no login shell, no home directory."
+- **Asserted in:** `compose.yaml` — "SECURITY PROPERTY of this service: it can reach mcp-gate and nothing else."
+- **Status:** enforced
+- **Enforced by:**
+  `tests/test_compose_isolation.py::mcp with a writable root filesystem`
+  `tests/test_compose_isolation.py::mcp keeping its capabilities`
+  `tests/test_compose_isolation.py::the gate running as root`
+  `tests/test_compose_isolation.py::the mcp image: the real Dockerfile passes`
+  `tests/test_supply_chain.py::the MCP image's bases are pinned`
+  `tests/test_supply_chain.py::its user has no login shell`
+  `tests/test_supply_chain.py::no pip, setuptools or ensurepip is anywhere in the MCP runtime image`
+  `tests/test_stack_mcp.py::mcp has a read-only root filesystem`
+
+### C-135 Only an empty AGENT_ID_SECRET turns the agent API off for everyone
+
+- **Claim:** Turning the MCP service off does not stop a person calling the agent
+  API with their own program; the API is off only while `AGENT_ID_SECRET` is empty,
+  and the MCP service then says so.
+- **Asserted in:** `docs/mcp.md` — "setting `AGENT_ID_SECRET` empty does, and it is the only switch for that."
+- **Status:** enforced
+- **Enforced by:**
+  `server/tests/test_agent_api.py::test_the_agent_api_is_off_without_its_secret`
+  `mcp/tests/test_mcp_integration.py::test_it_says_so_when_the_agent_api_is_off`
+
+### C-136 The MCP service is stateless and two callers never see each other's data
+
+- **Claim:** The service keeps no session and hands out no session id; each request
+  stands alone with its own token, and interleaved callers with different tokens each
+  get exactly their own answers.
+- **Asserted in:** `docs/mcp.md` — "Stateless. Each request carries its own token and stands alone."
+- **Status:** enforced
+- **Enforced by:**
+  `mcp/tests/test_mcp_service.py::test_the_service_keeps_no_session`
+  `mcp/tests/test_mcp_service.py::test_interleaved_callers_with_different_tokens_never_see_each_others_data`
+  `mcp/tests/test_mcp_integration.py::test_two_people_calling_at_once_never_see_each_others_projects`
+  `mcp/tests/test_mcp_docs.py::test_the_documented_curl_commands_run_and_answer_what_the_page_shows`
+
+### C-137 The MCP service bounds its body, its time and its concurrency
+
+- **Claim:** A request body over the limit is refused, a body not complete within
+  its deadline is dropped by the service with `408` (the gate cuts off its own
+  upstream leg at the same deadline), a call
+  to the API that takes longer than the timeout fails, calls past the in-flight
+  bound, in all or from one source, are refused after a short wait, and a credential
+  that is not shaped like a token never takes a slot or reaches the API. The page
+  says what is not bounded: a slow client's own connection to the proxy, which
+  Caddy holds as it does on every route, and connections per source.
+- **Asserted in:** `docs/mcp.md` — "A call waits up to a second (`MCP_QUEUE_WAIT_SECONDS`) for a slot and is then refused as busy."
+- **Asserted in:** `docs/mcp.md` — "A request whose body is not complete by then is dropped with `408`."
+- **Status:** enforced
+- **Enforced by:**
+  `mcp/tests/test_mcp_service.py::test_a_body_over_the_limit_is_refused`
+  `mcp/tests/test_mcp_service.py::test_a_slow_governance_server_times_out`
+  `mcp/tests/test_mcp_service.py::test_concurrency_is_bounded_and_the_overflow_is_refused`
+  `mcp/tests/test_mcp_abuse.py::test_slots_are_exactly_the_limit_and_are_given_back`
+  `mcp/tests/test_mcp_abuse.py::test_one_source_cannot_take_every_slot`
+  `mcp/tests/test_mcp_abuse.py::test_a_call_waits_a_short_bounded_time_for_a_slot`
+  `mcp/tests/test_mcp_abuse.py::test_garbage_is_the_one_rejected_message_with_no_slot_and_no_request`
+  `mcp/tests/test_mcp_abuse.py::test_garbage_bearers_from_many_threads_do_not_starve_a_legitimate_caller`
+  `mcp/tests/test_mcp_abuse.py::test_one_source_alternating_valid_tokens_cannot_starve_another_source`
+  `mcp/tests/test_mcp_abuse.py::test_a_body_trickled_forever_is_dropped_with_408`
+  `mcp/tests/test_mcp_abuse.py::test_a_slow_but_complete_body_is_served_and_nothing_is_cut_after_it`
+  `tests/test_stack_mcp.py::a body over the limit is refused`
+  `tests/test_stack_mcp.py::a body trickled to /mcp through the proxy is dropped by the service`
+  `tests/test_proxy_identity.py::mcp route: a body over the cap is refused`
+  `tests/test_proxy_identity.py::mcp route: a service that does not answer in 30 seconds is an error`
+
+### C-138 The proxy and the gate keep a token out of their logs
+
+- **Claim:** The proxy's log redacts the query string of `/mcp` and the
+  `Authorization` header; the gate's log redacts the query string of every request.
+- **Asserted in:** `docs/mcp.md` — "The proxy's log redacts a query string on `/mcp` and the `Authorization` header."
+- **Status:** enforced
+- **Enforced by:**
+  `tests/test_proxy_identity.py::the proxy's log keeps no query of /mcp`
+  `tests/test_proxy_identity.py::the proxy's log keeps no bearer token`
+  `tests/test_proxy_identity.py::gate: its log keeps no`
+  `tests/test_proxy_mcp_mutations.py`
+
+### C-139 The address a call is limited and recorded by is the one the edge observed
+
+- **Claim:** The source address the API rate-limits and audits for a call through
+  `/mcp` is the address of the peer the proxy itself observed. The proxy deletes any
+  `X-Forwarded-For`, `Forwarded`, `X-Real-IP` and `X-Client-Address` a client sent and
+  sets `X-Client-Address`; the gate passes it on as it is and never reads a
+  forwarding header; and no client can set `X-Client-Address` on any route. Rotating
+  every such header over a flood of failing calls ends in `429` exactly as the
+  direct route does, and a valid call's read-trail source is the peer. Behind a
+  load balancer the peer is the balancer, which the page says.
+- **Asserted in:** `docs/mcp.md` — "The proxy deletes any `X-Forwarded-For`, `Forwarded`, `X-Real-IP` and `X-Client-Address` a client sent and sets `X-Client-Address` to the address of the peer it sees."
+- **Status:** enforced
+- **Enforced by:**
+  `tests/test_proxy_identity.py::mcp route: X-Client-Address is the peer this proxy observed`
+  `tests/test_proxy_identity.py::mcp route: no forwarding claim a client made reaches the service`
+  `tests/test_proxy_identity.py::mcp route: rotating the claimed address`
+  `tests/test_proxy_identity.py::X-Client-Address is stripped on`
+  `tests/test_proxy_identity.py::gate: a forwarded-for claim never becomes the address`
+  `tests/test_proxy_mcp_mutations.py`
+  `tests/test_stack_mcp.py::rotated forwarding headers still end in 429, like the direct route`
+  `tests/test_stack_mcp.py::a valid call's source in the read trail is the peer, not a claim`
+  `mcp/tests/test_mcp_details.py::test_the_callers_address_is_the_proxys_header_and_an_ip_address_or_nothing`
+
+### C-140 The gate is inside the trust boundary, and the documentation says so
+
+- **Claim:** `mcp-gate` shares the `edge` network with the API and holds
+  `PROXY_SHARED_SECRET`, so a compromised gate can forge an identity to the API as a
+  compromised proxy can. compose.yaml and the page say so, say why that is judged
+  acceptable, and say to leave the profile off if it is not.
+- **Asserted in:** `docs/mcp.md` — "**`mcp-gate` is inside the trust boundary, exactly as the proxy is.**"
+- **Asserted in:** `compose.yaml` — "THIS SERVICE IS INSIDE THE TRUST BOUNDARY."
+- **Status:** enforced
+- **Enforced by:**
+  `tests/test_compose_isolation.py::mcp-gate holds the secret and sits on edge, and says so`
+  `tests/test_compose_isolation.py::the gate without the shared secret`
+  `tests/test_compose_isolation.py::mcp on the edge network`
+
+### C-141 The service writes no request content to its log, and a flood is a bounded log
+
+- **Claim:** Only the service's own messages reach its log, one bounded JSON object a
+  line: the method and path (only if known), the status, and the class of an
+  exception, never a header, a query, a body, a message a library quoted or a
+  traceback. Text in a request cannot start a line, and a burst of records is cut
+  off at a rate.
+- **Asserted in:** `docs/mcp.md` — "so text in a request cannot start a line of its own."
+- **Status:** enforced
+- **Enforced by:**
+  `mcp/tests/test_mcp_abuse.py::test_a_hostile_request_cannot_write_a_line_or_a_marker_into_the_log`
+  `mcp/tests/test_mcp_abuse.py::test_a_small_request_cannot_make_a_large_log`
+  `mcp/tests/test_mcp_abuse.py::test_a_flood_of_bad_requests_is_a_bounded_amount_of_log`
+  `mcp/tests/test_mcp_abuse.py::test_an_upstream_failure_logs_the_class_and_never_the_exception_text`
+  `mcp/tests/test_mcp_abuse.py::test_only_our_own_loggers_may_say_anything`
+  `mcp/tests/test_mcp_abuse.py::test_a_traceback_is_reduced_to_its_class`
+  `mcp/tests/test_mcp_abuse.py::test_a_line_is_one_json_object_whatever_the_message_holds`
+  `mcp/tests/test_mcp_mutations.py::test_each_guard_is_noticed_when_broken`

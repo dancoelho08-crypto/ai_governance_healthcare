@@ -151,6 +151,14 @@ jobs:
           TEST_APP_ROLE: "1"
         run: pytest -q -rs
 
+      # The optional MCP service (#164, R-73, D-91): the SDK's own client against the
+      # real service in front of the real API on this PostgreSQL, and every guard broken
+      # in a copy and noticed. No network is used: the service is called on loopback.
+      - run: pip install -e "mcp[dev]"
+      - name: pytest, the MCP service
+        working-directory: mcp
+        run: pytest -q -rs
+
   browser:
     name: browser (integration, Chromium)
     runs-on: ubuntu-latest
@@ -332,6 +340,12 @@ jobs:
       - name: proxy, the agent route's guards
         run: pixi run test-proxy-agent
 
+      # The optional MCP service's route in the Caddyfile and its gate: only the
+      # transport's methods on /mcp, every identity header stripped and none set,
+      # a 502 with nothing behind it, each guard broken in a copy and noticed (#164).
+      - name: proxy, the MCP route's and the gate's guards
+        run: pixi run test-proxy-mcp
+
       # Locked and hashed dependencies, digest-pinned images and actions, a watch for
       # updates, a security policy, and the real image built from the lock (#37).
       - name: supply chain
@@ -403,6 +417,9 @@ jobs:
             echo "PROXY_SHARED_SECRET=$(openssl rand -hex 32)"
             # On, so the end-to-end run exercises the agent API (#164).
             echo "AGENT_ID_SECRET=$(openssl rand -base64 48)"
+            # The host the MCP service answers to when its profile is turned on. The
+            # profile is NOT: `up` below starts the default services only (#164).
+            echo "MCP_ALLOWED_HOSTS=localhost:8080"
           } > .env
           docker compose up -d --build
           for _ in $(seq 1 60); do
@@ -414,16 +431,21 @@ jobs:
           docker compose logs
           exit 1
 
+      # Off by default, then on with the profile: the protocol through the real proxy to
+      # the real API, the isolation of the container, the logs and the read trail (#164).
+      - name: the MCP service, off and on
+        run: pixi run test-stack-mcp
+
       - name: end to end
         run: pixi run test-stack
 
       - name: logs on failure
         if: ${{ failure() }}
-        run: docker compose logs --no-color
+        run: docker compose --profile agent-mcp logs --no-color
 
       - name: tear down
         if: ${{ always() }}
-        run: docker compose down -v
+        run: docker compose --profile agent-mcp down -v
 
   # The page's own policy is enforced by each browser's own implementation, so the
   # two suites that depend on it run in Firefox and WebKit as well (#160). The

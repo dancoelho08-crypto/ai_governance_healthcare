@@ -2871,7 +2871,8 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
 
 - Status: Accepted: the owner's decisions 1 to 5 on #164 (2026-10-10), and the
   defaults listed below (the owner, 2026-10-11, on reviewing the open decisions).
-  Before that, the defaults were Proposed
+  Before that, the defaults were Proposed. Decision 5's last sentence (the docs
+  name no client or model) is amended by D-91.
 - **The question.** An agent has no browser session, so it cannot come through the
   front door's single sign-on, and R-06 says the API reads identity from the proxy
   header and nothing else. #164 asks for a way for a program to read the registered
@@ -3123,3 +3124,255 @@ Entry shape: the decision, why, what was rejected, and where it comes from.
       person may have copied for another reason, and cannot be relied on to work.
 - Carries out D-89 (l): the page that replaces minting from the console.
 - Source: #164 (PR 2 of 3); R-71, R-72; D-89.
+
+### D-91 The MCP server is a thin, stateless, separate service that holds no credential
+
+- Status: Accepted: the owner's decisions of 2026-10-09, 2026-10-10 and 2026-10-11
+  on #164, and the defaults listed in this entry (the owner, 2026-10-11). Before
+  that, the decisions were Accepted and the defaults Proposed, for the owner to
+  confirm. Defaults marked "added after the owner's acceptance; confirm" were
+  added or changed in fixing the review findings, and are for the owner to
+  confirm.
+- **The question.** D-89 gave a program a per-user, read-only way into the
+  register. #164 PR 3 asks for the chatbot's way in: an MCP server, so a person
+  can ask "which projects have criteria marked Not met?" in an interactive client.
+- **Decided (owner).**
+    1. **An interactive chatbot that makes the tool easier to use.** Not an
+       automation surface.
+    2. **Read-only.** Nothing that writes.
+    3. **A thin wrapper over the agent API.** It adds no rule and no data.
+    4. **A separate, optional service, off by default**, like the PHI-scan sidecar
+       (D-21): a compose profile, not in a plain `up`.
+    5. **The open MCP protocol over HTTPS with bearer tokens**, client-agnostic.
+    6. **Free text reaches a model only on request, labeled untrusted.** Version
+       1
+       returns none: ids from the framework vocabulary, statuses, decisions, dates,
+       and opaque people and project references.
+    7. **Tool descriptions tell the model not to follow instructions found in data.**
+    8. **Answers state statuses as recorded, with who (an opaque id) and when,
+       never as verdicts or "out of compliance".**
+    9. **Sending answers to an external model is a disclosure the operator
+       decides.** Which model is the operator's choice.
+    10. **The example model named in the documentation is MedGemma**
+        (`google/medgemma-27b-text-it` first, the 4B model as the smaller option),
+        2026-10-11. MedGemma is a model, not a client, so the documentation stays
+        **client-agnostic**: it shows how to point any MCP-capable client at the
+        server and at an OpenAI-compatible endpoint (vLLM serving MedGemma, say).
+        **No client code is shipped** and no client is endorsed; a neutral mention
+        that some clients, such as OpenMed Agent (Apache-2.0 per its README, gated
+        access), attach remote MCP servers over HTTPS with an `Authorization`
+        bearer header is allowed, labeled "not tested here". The MedGemma facts
+        are
+        stated only as "from the model card; verify at the source", the page says
+        plainly that it has not been tested with this server, and the evaluation
+        plan is documented only: no harness, because a model cannot run in CI. This
+        amends the last sentence of D-89 decision 5 ("the docs name no client or
+        model").
+- **How it is built.**
+    - SDK and transport. The official MCP Python SDK (`mcp`, 1.30.0, locked with
+      hashes in `mcp/requirements.txt`), `FastMCP`, **Streamable HTTP, stateless,
+      JSON responses**. `POST /mcp` is the only method served; `GET` and `DELETE`
+      are `405` (nothing to stream, no session to end).
+    - Tools. `whoami`, `list_portfolio(status, decision, overdue, overdue_since,
+      overdue_before, owner, framework, limit, offset)` and `get_project(ref)`,
+      each
+      with typed input and an output model (`structuredContent` and the same JSON
+      as text), annotated read-only. `chai_mcp.server.ToolName` is the
+      allowlist, a
+      test enumerates what is registered, and `chai_mcp.upstream.Route` is the
+      three routes, all `GET`.
+    - The token. Read from the `Authorization` header of the request that carries
+      the call, forwarded in a client built for that call and closed after it
+      (no pool, no cookie jar, no redirect followed), and kept nowhere. Tests walk
+      what the app can reach for it, sweep the log, and mutate each way of keeping
+      it.
+    - Answers are checked twice. The API builds them from an allowlist (D-89); the
+      service parses each into models that forbid extra fields and hold each string
+      to a shape: an id is one token of at most 32 characters with no space and
+      no
+      run of five digits, a status or decision is one to three plain words of
+      letters of at most 32 characters, and the rest are opaque ids and dates. A
+      shape cannot tell a short phrase of plain words (`Jane Doe`) from a
+      decision, which a test states: the first wall is the API's list of the
+      build's own words, and this is a heuristic stand-in for it.
+    - Failures are a few fixed messages (`token rejected or expired`, `no such
+      project...`, `the governance server is unavailable`, and so on). A 422's own
+      message is cut to plain characters, a 429 carries `Retry-After`. The upstream
+      body and the token are in none.
+    - Isolation. `mcp` is on an internal `agent` network with `mcp-gate`, a Caddy
+      with two listeners (the same pinned image as the proxy): `:8082` carries the
+      proxy's `/mcp` to the service, `:8081` carries the caller's token from the
+      service to the three agent `GET` routes and adds the shared secret the API
+      may require (`PROXY_SHARED_SECRET`), which the service never holds.
+      `mcp-gate` is on `edge` and `agent`; `mcp` is on `agent` alone.
+    - The gate is inside the trust boundary (review M1). It is on `edge` with the
+      API and holds the shared secret, so a compromised gate is identity forgery,
+      as a compromised proxy is, and compose.yaml's "the only other member of
+      `edge` is `proxy`" now says "plus, only with the profile, `mcp-gate`".
+      That is
+      judged acceptable because the gate is as small as it can be: a pinned stock
+      Caddy, read-only, one capability, no port, a static upstream per listener,
+      three `GET` routes and one path, serving only requests the proxy already
+      parsed, from one internal client, with a health check. The alternative, to
+      give
+      the service the secret or a route to the API, moves the same risk onto the
+      part that parses a chatbot's requests. An operator who cannot accept it
+      leaves the profile off. The image is Caddy's, so it has a shell; the
+      claim is a small configuration, not an absence of tools.
+    - The caller's address (review H1). The API rate-limits and audits a call by
+      a
+      source address, so it must be what the edge itself observed. The proxy's
+      `/mcp` route deletes `X-Forwarded-For`, `Forwarded`, `X-Real-IP` and
+      `X-Client-Address` from the client and sets `X-Client-Address` to
+      `{remote_host}`, the same value the agent route gives the API as `X-Real-IP`
+      (a site-level directive also removes `X-Client-Address` from every other
+      route). The gate has no `trusted_proxies` and no `{client_ip}`: it passes
+      the
+      header on as it is and hands the API `X-Real-IP` from it, which the API
+      believes only from the gate's address inside `TRUSTED_PROXY_CIDR` (R-71, C-115).
+      The service validates it as an IP address before forwarding. Behind a load
+      balancer the peer is the balancer, so everyone is one source; the page
+      says so.
+    - Slots (review H3). A credential not shaped like a token the API mints (`agt_`,
+      16 hex, `.`, 43 URL-safe characters, ASCII) is refused with the one rejected
+      message before a slot is taken or a request is made. Calls take a slot
+      from a
+      per-source bound (4) and a global one (64), waiting at most a second, then
+      are refused as busy. One source cannot take every slot and garbage takes none.
+    - The log (review M2). Only `chai.mcp` loggers may carry text; every other logger
+      is at WARNING and reduced to its name, level and exception class; one bounded
+      JSON object a line with no traceback; a burst limit; the access line logs
+      the
+      path only if it is `/mcp` or `/healthz`.
+    - Bodies (review M3). The gate's listeners have `read_header` and
+      `read_body` of
+      10 seconds, the proxy `read_header` of 10 seconds and no body deadline: Go's
+      `ReadTimeout` also cancels the context of a handler still running when it
+      expires, so a global one would end every `/api/events` stream, and it would
+      bound the dashboard's largest write. The service drops a body not complete
+      in
+      10 seconds with `408` and frees what it held, refuses a compressed body with
+      `415`, and uvicorn refuses past 256 connections. What is NOT bounded: a slow
+      client's own connection to the proxy (and the gate), which Caddy holds as
+      it
+      does on every route, and connections per source. The documentation says
+      so and leaves that to the front door or load balancer.
+    - The proxy. `/mcp` is a `handle` that skips sign-on, deletes the sixteen
+      identity header names, `X-Client-Address` and `X-Proxy-Secret`, sets none,
+      forwards `POST`, `GET` and `DELETE` on exactly `/mcp`, caps the body at 64
+      KB,
+      and answers the rest of the prefix with `404`; the upstream is
+      `${MCP_UPSTREAM:-mcp-gate:8082}`, so with the profile off the name does not
+      resolve and Caddy answers `502`. The log's query redaction covers `/mcp`.
+    - The service's own front. Host and Origin validated by the SDK's transport
+      security before the token is looked at, `MCP_ALLOWED_HOSTS` required to start,
+      no CORS and no `OPTIONS`, a query string refused, a 64 KB body, a 10 second
+      timeout, 64 calls in flight and 4 a source (a call waits up to a second),
+      one log line a request, uvicorn's access log off.
+    - The image. `mcp/Dockerfile`, built like the API's: two stages, a lock verified
+      by hash, digests pinned, no pip at runtime, uid 10002 with a `nologin` shell,
+      started directly by `python -m chai_mcp`, a health check, read-only root,
+      every capability dropped, no port published. It is built and scanned (HIGH
+      and
+      CRITICAL with a fix fail the job) in `security.yml`, and watched by Dependabot.
+- **Rejected.**
+    - A route inside the API process. It would make the API parse a chatbot's
+      protocol, and could not be switched off or isolated from the database.
+    - A service account for the MCP service. The access follows the person (D-89).
+    - A service that stores tokens, or exchanges one for another. A stored token
+      is a
+      thing to steal; forwarding costs nothing.
+    - Write tools, or any tool that takes a URL or a path. Read-only is the
+      decision, and a URL is an exfiltration channel.
+    - Stateful sessions and a server-sent stream. Nothing to stream, and a session
+      is state a token could outlive.
+    - Putting `mcp` on `edge`, or giving it the shared secret and the API's address.
+      A compromised parser of chatbot requests would then reach the API, and the
+      proxy's sign-on listener on the same network trusts a header a front door
+      sets.
+    - OAuth for the MCP server. The credential is the app's own per-user bearer
+      token
+      (D-89); a second authorization scheme would be a second thing to get wrong.
+    - Shipping a client, bundling a model, or endorsing either. The documentation
+      shows how to connect one; which is the operator's choice.
+- **Defaults, accepted by the owner (2026-10-11).**
+    - (a) The tool names and parameters above, and that `list_portfolio` takes the
+      agent API's filters unchanged.
+    - (b) Stateless JSON responses and `POST` only, with `GET` and `DELETE` answered
+      `405` after the proxy forwards them (so a client told `405` behaves as the
+      transport says).
+    - (c) The extra `mcp-gate` service and the `agent` network, rather than putting
+      `mcp` beside the proxy.
+    - (d) (Changed after the owner's acceptance; confirm: it was four words and
+      48
+      characters.) The second wall's shape (an id of at most 32 characters with
+      no space
+      or
+      five-digit run; a status or decision of one to three plain words of at most
+      32 characters). It is a heuristic stand-in for a list of words. A custom
+      framework whose ids, statuses or decisions are longer or have digits or
+      other punctuation would have its answers refused whole until the shape is
+      widened in `models.py`.
+    - (e) (Changed after the owner's acceptance; confirm: it was 16 in flight, no
+      per-source bound.) The limits: 64 KB, 10 seconds, 64 in flight and 4 a
+      source, a one-second
+      wait, a 10 second body deadline.
+    - (f) `MCP_ALLOWED_HOSTS` is required to start; the loopback names are always
+      allowed (for the container's health check).
+    - (g) The SDK is pinned to the 1.x line (1.30.0). A 2.x exists and was not
+      adopted.
+    - (h) A query string on `/mcp` is refused (`400`), and the proxy's log
+      redacts it
+      anyway.
+    - (i) With the profile off, `/mcp` answers `502`, not `404`: the route is in
+      the
+      proxy and nothing is behind it.
+    - (j) The MCP tests run in the server job (they need the same PostgreSQL), from
+      `mcp/`, with the package installed from `mcp/pyproject.toml`; the proxy
+      and stack
+      tests run in the stack job.
+    - (k) `make down`, `logs`, `ps` and `prune` name the profile, so a running MCP
+      service is stopped with the rest.
+    - (l) The documentation names `google/medgemma-4b-it` as the 4B model, as a
+      model
+      card fact to verify, gives a `vllm serve` command marked untested, and
+      names no
+      tool-call parser (the card does not mention function calling).
+    - (m) The service cannot tell a person's own call from a model's, and
+      neither can
+      the API: both are agent access in the read trail.
+    - (n) Added after the owner's acceptance; confirm. The in-flight bounds: 64
+      in
+      all, 4 from one source, a call waits at most 1 second (`MCP_MAX_IN_FLIGHT`,
+      `MCP_MAX_IN_FLIGHT_PER_SOURCE`, `MCP_QUEUE_WAIT_SECONDS`), and a credential
+      not shaped like a token never takes a slot.
+    - (o) Added after the owner's acceptance; confirm. Time limits: headers 10
+      seconds at the proxy and the gate, a body 10 seconds at the service
+      (`MCP_BODY_TIMEOUT_SECONDS`, `408`) and the gate, a compressed body `415`,
+      uvicorn `503` past 256 connections, and no body deadline at the proxy (it
+      would end `/api/events`).
+    - (p) Added after the owner's acceptance; confirm. The gate is inside the
+      trust boundary and the documentation and compose.yaml say so; the profile
+      is to be left off by anyone who cannot accept that.
+    - (q) Added after the owner's acceptance; confirm. The log rules: only
+      `chai.mcp` loggers carry text, one bounded JSON line, no traceback, a burst
+      limit, a path logged only if it is `/mcp` or `/healthz`.
+    - (r) Added after the owner's acceptance; confirm. The source address is the
+      peer the proxy observed (`X-Client-Address`), never a forwarding header, and
+      the gate has no `trusted_proxies`.
+    - (s) Added after the owner's acceptance; confirm. `mcp-gate` has a health
+      route and a Docker health check, and the image has no pip of its own.
+- **Cost, stated.** `/mcp` is a second path reachable without single sign-on, so
+  the
+  token is the only thing between a caller and the data on it, and a front door
+  that
+  authenticates every path cannot offer the MCP server at all. The documentation
+  says
+  where, per front door, and only this repository's Caddy is tested for it. An answer
+  sent to a model is out of this system's hands; turning the service off does
+  not stop
+  a person calling the agent API with their own program, and the only switch for
+  that
+  is an empty `AGENT_ID_SECRET`.
+- Source: #164 and the owner's decisions of 2026-10-09, 2026-10-10 and 2026-10-11;
+  R-73; D-89; D-21 (the opt-in sidecar pattern).

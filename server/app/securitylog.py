@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sys
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -132,17 +133,25 @@ class RedactAgentQuery(logging.Filter):
     read their token from the Authorization header only, but a client that puts it in a
     URL anyway (``?token=``) would have it written to the log, where it is a credential
     that outlives the call. The route is refused either way; this makes the log honest
-    about not keeping what was sent. Other routes' lines are unchanged.
+    about not keeping what was sent.
+
+    The route is decided on the target as written, by the same rule as the proxy's log
+    (proxy/Caddyfile): the logged target is the raw one, and the app routes on the
+    cleaned path, so a spelling that reaches an agent route after cleaning has to be
+    treated as one. The query goes when the part before the ``?`` has the word ``agent``
+    in any case, a percent-encoded character, a doubled slash (which an absolute-form
+    target has), or a dot or empty segment, or when the query itself says ``agent``.
+    Over-redacting is fine; an ordinary route's query is still logged.
     """
 
-    PREFIX = "/api/agent/"
+    MIGHT_BE_AGENT = re.compile(r"(?i)agent|%|//|/\.{1,2}(?:/|$)")
 
     def filter(self, record: logging.LogRecord) -> bool:
         args = record.args
         if isinstance(args, tuple) and len(args) >= 3 and isinstance(args[2], str):
             target = args[2]
-            path, mark, _query = target.partition("?")
-            if mark and path.startswith(self.PREFIX):
+            path, mark, query = target.partition("?")
+            if mark and (self.MIGHT_BE_AGENT.search(path) or "agent" in query.lower()):
                 record.args = (*args[:2], f"{path}?[redacted]", *args[3:])
         return True
 

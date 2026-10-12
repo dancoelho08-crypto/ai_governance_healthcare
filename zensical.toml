@@ -31,6 +31,7 @@ nav = [
   { "Self-hosting" = "self-hosting.md" },
   { "Cloud deployment" = "deploy.md" },
   { "The agent API" = "agent-api.md" },
+  { "The MCP server" = "mcp.md" },
   { "Privacy and retention" = "privacy.md" },
   { "Security claims" = "security-claims.md" },
   { "Exports" = "exports.md" },

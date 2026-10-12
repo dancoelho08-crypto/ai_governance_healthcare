@@ -120,10 +120,10 @@ class Shape(StrEnum):
 
 # Where application code lives. Every Python file and every script under app/ is
 # checked, EXCEPT tests: a test that pins the wire format ("the API sends role
-# 'owner'") should say so in plain text. Only these two trees are exempt, so code
+# 'owner'") should say so in plain text. Only these three trees are exempt, so code
 # cannot become unchecked by being put in a directory that merely has "tests" in
 # its path.
-TEST_PREFIXES = ("tests/", "server/tests/")
+TEST_PREFIXES = ("tests/", "server/tests/", "mcp/tests/")
 SKIP_PARTS = frozenset(
     # .claude holds agents' git worktrees: other checkouts, not this one's code.
     {"__pycache__", ".pixi", ".git", "node_modules", "site", ".cache", ".claude"}
