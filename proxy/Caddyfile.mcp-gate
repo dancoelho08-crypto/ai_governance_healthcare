@@ -1,0 +1,166 @@
+# =============================================================================
+# proxy/Caddyfile.mcp-gate -- the MCP service's only two doors (#164, R-73, D-91).
+#
+# Runs only with compose's `agent-mcp` profile, as the `mcp-gate` service. It exists
+# so the MCP service, the one part that parses a chatbot's requests, can sit on a
+# network of its own with exactly this one neighbor:
+#
+#   proxy  -->  mcp-gate :8082  -->  mcp          (a person's chatbot, in)
+#   mcp    -->  mcp-gate :8081  -->  api          (the caller's own token, out)
+#
+# `mcp` is on the internal `agent` network and nothing else, so it cannot reach the
+# API, the database, or the proxy's single sign-on listener, which trusts a header the
+# front door sets. A compromised MCP service can ask for the three read-only agent
+# routes, with a token it was handed, and for nothing else.
+#
+# This file has no sign-on, no identity, and sets no identity header: both listeners
+# STRIP every header that could be taken for one. The API ignores identity headers on
+# the agent routes anyway; this is defense in depth, as in proxy/Caddyfile.
+# =============================================================================
+{
+	admin off
+	# Plain HTTP on an internal network: nothing here is a public name.
+	auto_https off
+
+	# Trust X-Forwarded-For from the proxy, which is on a private address, so
+	# {client_ip} below is the caller and not the proxy.
+	servers {
+		trusted_proxies static private_ranges
+	}
+}
+
+# MCP service -> the agent API. Only the three GET routes, with the caller's token
+# forwarded untouched (the Authorization header is not named here, so it passes).
+http://:8081 {
+	log {
+		output stdout
+		format filter {
+			wrap console
+			fields {
+				# Nothing here needs a query string in a log, and a token has no
+				# place in one.
+				request>uri regexp "^([^?]*)\?.*$" "$1?[redacted]"
+				request>headers>X-Api-Key replace REDACTED
+				request>headers>Api-Key replace REDACTED
+				request>headers>X-Auth-Token replace REDACTED
+				request>headers>X-Authorization replace REDACTED
+				request>headers>X-Access-Token replace REDACTED
+			}
+		}
+	}
+
+	@agentread {
+		method GET
+		path /api/agent/me /api/agent/portfolio /api/agent/projects/*
+	}
+	handle @agentread {
+		request_body {
+			max_size 16KB
+		}
+
+		route {
+			request_header -X-Auth-Request-User
+			request_header -X-Auth-Request-Name
+			request_header -X-Auth-Request-Email
+			request_header -X-Goog-Authenticated-User-Email
+			request_header -X-Goog-Authenticated-User-Id
+			request_header -X-Goog-Iap-Jwt-Assertion
+			request_header -X-Amzn-Oidc-Identity
+			request_header -X-Amzn-Oidc-Data
+			request_header -X-Amzn-Oidc-Accesstoken
+			request_header -X-Ms-Client-Principal
+			request_header -X-Ms-Client-Principal-Id
+			request_header -X-Ms-Client-Principal-Name
+			request_header -X-Ms-Client-Principal-Idp
+			request_header -X-Forwarded-Email
+			request_header -X-Forwarded-User
+			request_header -X-Forwarded-Preferred-Username
+
+			header Cache-Control "no-store"
+
+			reverse_proxy api:8000 {
+				flush_interval -1
+				# The CALLER's address, as this gate itself was told it (below), so the
+				# API's per-source limit counts the person and not the one service that
+				# carries every person's calls. The API reads it only from a peer in
+				# TRUSTED_PROXY_CIDR and only if it parses as an IP address.
+				header_up X-Real-IP "{http.request.header.X-Client-Address}"
+				# The shared secret the API may require (PROXY_SHARED_SECRET). The MCP
+				# service never holds it: this gate does.
+				header_up X-Proxy-Secret "{$PROXY_SHARED_SECRET}"
+				transport http {
+					dial_timeout 5s
+				}
+			}
+		}
+	}
+
+	handle {
+		respond "Not found." 404
+	}
+}
+
+# The proxy -> the MCP service. Only the transport's methods on the single path.
+http://:8082 {
+	log {
+		output stdout
+		format filter {
+			wrap console
+			fields {
+				request>uri regexp "^([^?]*)\?.*$" "$1?[redacted]"
+				request>headers>X-Api-Key replace REDACTED
+				request>headers>Api-Key replace REDACTED
+				request>headers>X-Auth-Token replace REDACTED
+				request>headers>X-Authorization replace REDACTED
+				request>headers>X-Access-Token replace REDACTED
+			}
+		}
+	}
+
+	@mcp {
+		method POST GET DELETE
+		path /mcp
+	}
+	handle @mcp {
+		request_body {
+			max_size 64KB
+		}
+
+		route {
+			request_header -X-Auth-Request-User
+			request_header -X-Auth-Request-Name
+			request_header -X-Auth-Request-Email
+			request_header -X-Goog-Authenticated-User-Email
+			request_header -X-Goog-Authenticated-User-Id
+			request_header -X-Goog-Iap-Jwt-Assertion
+			request_header -X-Amzn-Oidc-Identity
+			request_header -X-Amzn-Oidc-Data
+			request_header -X-Amzn-Oidc-Accesstoken
+			request_header -X-Ms-Client-Principal
+			request_header -X-Ms-Client-Principal-Id
+			request_header -X-Ms-Client-Principal-Name
+			request_header -X-Ms-Client-Principal-Idp
+			request_header -X-Forwarded-Email
+			request_header -X-Forwarded-User
+			request_header -X-Forwarded-Preferred-Username
+			request_header -X-Proxy-Secret
+
+			header Cache-Control "no-store"
+
+			reverse_proxy {$MCP_UPSTREAM:mcp:8000} {
+				flush_interval -1
+				# Set, never forwarded: whatever a client sent under this name is
+				# replaced. The service passes it on to the other listener.
+				header_up X-Client-Address "{client_ip}"
+				transport http {
+					dial_timeout 5s
+					response_header_timeout 30s
+				}
+			}
+		}
+	}
+
+	handle {
+		respond "Not found." 404
+	}
+}

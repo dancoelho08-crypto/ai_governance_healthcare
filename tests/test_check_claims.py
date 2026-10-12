@@ -72,6 +72,10 @@ def world(root: Path, **overrides) -> cc.Context:
     (root / "docs").mkdir(exist_ok=True)
     (root / "tests").mkdir(exist_ok=True)
     (root / "server" / "tests").mkdir(parents=True, exist_ok=True)
+    (root / "mcp" / "tests").mkdir(parents=True, exist_ok=True)
+    (root / "mcp" / "tests" / "test_m.py").write_text(
+        "async def test_m():\n    pass\n", encoding="utf-8"
+    )
     (root / "docs" / "doc.md").write_text(
         "Intro.\n\nThe proxy strips it,\nand sets its own.\n", encoding="utf-8"
     )
@@ -90,7 +94,8 @@ def world(root: Path, **overrides) -> cc.Context:
         workflow_text=overrides.get(
             "workflow_text",
             "jobs:\n  server:\n    steps:\n      - run: pytest\n"
-            "        working-directory: server\n  w:\n    steps:\n"
+            "        working-directory: server\n      - run: pytest\n"
+            "        working-directory: mcp\n  w:\n    steps:\n"
             "      - run: pixi run test-a\n",
         ),
         pixi_tasks=overrides.get("pixi_tasks", {"test-a": "python tests/test_a.py"}),
@@ -263,6 +268,20 @@ def main() -> int:
             for p in problems_for(
                 page(evidence="`server/tests/test_s.py::TestZ::test_z`"),
                 workflow_text="jobs: {}",
+            )
+        ),
+    )
+    check(
+        "an MCP pytest test is run by CI",
+        problems_for(page(evidence="`mcp/tests/test_m.py::test_m`")) == [],
+    )
+    check(
+        "an MCP test is NOT counted if CI does not run pytest in mcp/",
+        any(
+            "mcp/" in p
+            for p in problems_for(
+                page(evidence="`mcp/tests/test_m.py::test_m`"),
+                workflow_text=SERVER_ONLY,
             )
         ),
     )

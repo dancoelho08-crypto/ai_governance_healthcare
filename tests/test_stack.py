@@ -27,7 +27,8 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-BASE = "http://localhost:8080"
+# STACK_URL lets two stacks on one machine (two worktrees) use different ports.
+BASE = os.environ.get("STACK_URL", "http://localhost:8080")
 
 # CI sets REQUIRE_TESTS=1. A suite that cannot run then FAILS instead of
 # skipping, because a skip exits 0 and reads as a pass: that is how CI once

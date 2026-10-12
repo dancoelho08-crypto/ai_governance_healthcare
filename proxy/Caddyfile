@@ -57,8 +57,10 @@
 		# header only, and Caddy already redacts that header's value (and Cookie's) in
 		# its log. A client that puts a token in a URL query anyway would have it written
 		# here, so the query string is dropped from the logged URI whenever the URI is, or
-		# might be, an agent route. Caddy routes on the decoded, cleaned path while the
-		# log holds the raw request target, so "might be" is any of: the word "agent" in
+		# might be, an agent route or the MCP route (/mcp, below, which carries a token the
+		# same way). Caddy routes on the decoded, cleaned path while the
+		# log holds the raw request target, so "might be" is any of: the word "agent" or
+		# "mcp" in
 		# it (any case), a percent-encoded character before the "?" (/api/%61gent/...),
 		# an absolute-form target (http://host/..., which has a "//"), or an empty or dot
 		# path segment
@@ -69,7 +71,7 @@
 		format filter {
 			wrap console
 			fields {
-				request>uri regexp "(?i)^(?:([^?]*(?:agent|%|//|/\.{1,2}(?:/|$))[^?]*)\?.*|([^?]*)\?.*agent.*)$" "$1$2?[redacted]"
+				request>uri regexp "(?i)^(?:([^?]*(?:agent|mcp|%|//|/\.{1,2}(?:/|$))[^?]*)\?.*|([^?]*)\?.*(?:agent|mcp).*)$" "$1$2?[redacted]"
 				request>headers>X-Api-Key replace REDACTED
 				request>headers>Api-Key replace REDACTED
 				request>headers>X-Auth-Token replace REDACTED
@@ -351,6 +353,76 @@
 				}
 			}
 		}
+	}
+
+	# -------------------------------------------------------------------------
+	# The optional MCP service (#164, R-73, D-91): a chatbot's door to the same three
+	# read-only agent routes. Like the agent API it answers to a bearer token, not to a
+	# session, so it is the second place a request goes past the sign-on handle, and
+	# for the same reason it is safe: this block never SETS an identity and STRIPS
+	# everything that could be taken for one. The service behind it forwards the
+	# caller's own token to the agent API and holds none of its own.
+	#
+	# OFF BY DEFAULT. The upstream is the `mcp-gate` service of compose's `agent-mcp`
+	# profile (docker compose --profile agent-mcp up). Without it the name does not
+	# resolve and Caddy answers 502 to a POST on /mcp: the route exists, nothing is
+	# behind it, and nothing here reaches the main API. Set MCP_UPSTREAM to point
+	# another Caddy deployment at the service.
+	#
+	# Only the three methods of the MCP transport, on the single path /mcp. Anything
+	# else under the prefix is a 404 here and goes no further. No query string is
+	# accepted by the service, and the log redacts one (above).
+	#
+	# The operator must also let this path through a front door that authenticates every
+	# request: docs/mcp.md says how, per front door. This file cannot.
+	# -------------------------------------------------------------------------
+	@mcpfront {
+		method POST GET DELETE
+		path /mcp
+	}
+	handle @mcpfront {
+		request_body {
+			max_size 64KB
+		}
+
+		route {
+			# STRIP everything that could be read as "who is this", the same list as
+			# the agent block, and the one header the gate trusts for the caller's
+			# address (the gate sets it itself).
+			request_header -X-Auth-Request-User
+			request_header -X-Auth-Request-Name
+			request_header -X-Auth-Request-Email
+			request_header -X-Goog-Authenticated-User-Email
+			request_header -X-Goog-Authenticated-User-Id
+			request_header -X-Goog-Iap-Jwt-Assertion
+			request_header -X-Amzn-Oidc-Identity
+			request_header -X-Amzn-Oidc-Data
+			request_header -X-Amzn-Oidc-Accesstoken
+			request_header -X-Ms-Client-Principal
+			request_header -X-Ms-Client-Principal-Id
+			request_header -X-Ms-Client-Principal-Name
+			request_header -X-Ms-Client-Principal-Idp
+			request_header -X-Forwarded-Email
+			request_header -X-Forwarded-User
+			request_header -X-Forwarded-Preferred-Username
+			request_header -X-Client-Address
+			request_header -X-Proxy-Secret
+
+			# The token is a credential in a request: never cache the answer.
+			header Cache-Control "no-store"
+
+			reverse_proxy {$MCP_UPSTREAM:mcp-gate:8082} {
+				flush_interval -1
+				transport http {
+					dial_timeout 5s
+					response_header_timeout 30s
+				}
+			}
+		}
+	}
+
+	handle /mcp* {
+		respond "Not found." 404
 	}
 
 	# -------------------------------------------------------------------------

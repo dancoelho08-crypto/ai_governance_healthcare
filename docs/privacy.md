@@ -58,6 +58,21 @@ log without being a row. A token is deleted with the person's `principals` row,
 and
 a token that has not been revoked still stops working after 8 hours.
 
+**Through the MCP server.** If the operator turns on the optional [MCP
+server](mcp.md), a person's chatbot can make these same calls, and the answers
+go wherever that chatbot's model runs: on the person's machine, in your cloud
+account, or at a model provider. That is a disclosure of the set of your AI
+tools and where each stands, as opaque ids, statuses, decisions and dates. It is
+not patient data, and it holds no name, email or free text, but it may still be
+sensitive to your organization. **Where answers may go is the operator's
+decision**, and the MCP page has the checklist: which model, where it runs,
+whether the data leaves your network, what its operator keeps, and who can mint
+a token. The MCP service itself stores nothing and logs no token or query string,
+and the API cannot tell a call through it from a direct one: both are one row in
+the read trail, marked as agent access. Turning the MCP service off does not stop
+a person using the agent API with their own program; leaving `AGENT_ID_SECRET`
+empty does.
+
 Where an answer goes after it leaves this server is **not** this server's decision
 and not something it can see. If the program that holds a token sends answers to
 a

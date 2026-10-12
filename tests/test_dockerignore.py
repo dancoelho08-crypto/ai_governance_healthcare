@@ -56,6 +56,8 @@ ROOT_FORBIDDEN = [
     ".git/",
 ]
 SERVER_FORBIDDEN = [".env.dockerignore-probe", "tests/"]
+# The optional MCP service's context (mcp/): the same two things (#164).
+MCP_FORBIDDEN = [".env.dockerignore-probe", "tests/"]
 
 
 def copy_sources(dockerfile: str) -> list[str]:
@@ -82,6 +84,9 @@ ROOT_NEEDED = copy_sources((ROOT / "proxy" / "Dockerfile").read_text(encoding="u
 SERVER_NEEDED = copy_sources(
     (ROOT / "server" / "Dockerfile").read_text(encoding="utf-8")
 )
+
+
+MCP_NEEDED = copy_sources((ROOT / "mcp" / "Dockerfile").read_text(encoding="utf-8"))
 
 
 def sent_files(context: Path, workdir: Path, candidates: list[str]) -> list[str]:
@@ -218,6 +223,25 @@ def main() -> int:
                 "what the Dockerfile COPYs is still sent",
                 not missing(files, SERVER_NEEDED),
                 ", ".join(missing(files, SERVER_NEEDED)),
+            )
+        finally:
+            for path in decoys:
+                path.unlink(missing_ok=True)
+
+        print("The MCP image's context (mcp/)")
+        mcp = ROOT / "mcp"
+        decoys = with_decoys(mcp, MCP_FORBIDDEN)
+        try:
+            files = sent_files(mcp, workdir, [*MCP_FORBIDDEN, ".env", *MCP_NEEDED])
+            check(
+                "no env file or test reaches the daemon (mcp)",
+                not leaks(files, MCP_FORBIDDEN),
+                ", ".join(leaks(files, MCP_FORBIDDEN)[:8]),
+            )
+            check(
+                "what the MCP Dockerfile COPYs is still sent",
+                not missing(files, MCP_NEEDED),
+                ", ".join(missing(files, MCP_NEEDED)),
             )
         finally:
             for path in decoys:

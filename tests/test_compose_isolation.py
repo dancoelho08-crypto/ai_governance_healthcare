@@ -20,7 +20,10 @@ This reads the real compose.yaml and fails if the property is edited away:
   pinned to a major version (Postgres does not migrate its on-disk format);
 * the page the proxy serves and the manifest the migrate job loads the retirement
   rules from are one build directory, APP_DIR (D-76), read-only, with today's paths
-  as the defaults.
+  as the defaults;
+* the optional MCP service (#164, R-73, D-91) is off unless its profile is asked for,
+  is alone on an internal network with one Caddy gate, holds no credential, and its
+  image is non-root with no shell, locked and digest-pinned.
 
 Each rule has a mutation test: break a copy of the real file and demand it notice.
 
@@ -30,6 +33,7 @@ Each rule has a mutation test: break a copy of the real file and demand it notic
 from __future__ import annotations
 
 import copy
+import os
 import re
 import sys
 from pathlib import Path
@@ -42,6 +46,11 @@ DEV = ROOT / "compose.dev.yaml"
 
 API, DB, PROXY = "api", "db", "proxy"
 EDGE, DATA = "edge", "data"
+MCP, MCP_GATE, AGENT = "mcp", "mcp-gate", "agent"
+MCP_PROFILE = "agent-mcp"
+# What `docker compose up` starts: everything without a profile. Adding a service here
+# is a decision, and this list is where it is made.
+DEFAULT_SERVICES = {"db", "api", "migrate", "proxy", "proxy-perms"}
 VOLUME = "pgdata"
 
 failures: list[str] = []
@@ -97,7 +106,7 @@ def edge_members(compose: dict) -> list[str]:
         nets = list(nets.keys()) if isinstance(nets, dict) else list(nets)
         if EDGE in nets:
             members.append(name)
-    allowed = {API, PROXY}
+    allowed = {API, PROXY, MCP_GATE}
     return [
         f"{m} is on '{EDGE}', which would let it reach the API and forge identity"
         for m in members
@@ -416,6 +425,166 @@ def one_build_for_page_and_rules(compose: dict) -> list[str]:
     return problems
 
 
+def _nets(svc: dict) -> list[str]:
+    nets = svc.get("networks", [])
+    return list(nets.keys()) if isinstance(nets, dict) else list(nets)
+
+
+def mcp_is_off_unless_asked(compose: dict) -> list[str]:
+    """The MCP service must not start with a bare `docker compose up` (#164)."""
+    problems = []
+    services = compose.get("services", {})
+    for name in (MCP, MCP_GATE):
+        if (services.get(name) or {}).get("profiles") != [MCP_PROFILE]:
+            problems.append(f"{name} is not in the {MCP_PROFILE} profile alone")
+    default = {n for n, svc in services.items() if not svc.get("profiles")}
+    if default != DEFAULT_SERVICES:
+        problems.append(
+            f"a bare `up` would start {sorted(default)}, not {sorted(DEFAULT_SERVICES)}"
+        )
+    return problems
+
+
+def mcp_has_a_network_of_its_own(compose: dict) -> list[str]:
+    """`mcp` is on the internal `agent` network and nothing else, so it reaches only
+    the gate: not the API, the database, or the proxy's single sign-on listener."""
+    problems = []
+    members = {
+        n for n, svc in compose.get("services", {}).items() if AGENT in _nets(svc)
+    }
+    if members != {MCP, MCP_GATE}:
+        problems.append(f"'{AGENT}' holds {sorted(members)}, not just mcp and mcp-gate")
+    if _nets(service(compose, MCP)) != [AGENT]:
+        problems.append(
+            f"mcp must be on [{AGENT}] only, found {_nets(service(compose, MCP))}"
+        )
+    if sorted(_nets(service(compose, MCP_GATE))) != sorted([EDGE, AGENT]):
+        problems.append("mcp-gate must be on edge (to reach the API) and agent only")
+    if not (compose.get("networks", {}).get(AGENT) or {}).get("internal"):
+        problems.append(f"network '{AGENT}' is not internal: true")
+    for name in (API, PROXY, DB, "migrate"):
+        if AGENT in _nets(service(compose, name)):
+            problems.append(f"{name} is on '{AGENT}'")
+    for name in (MCP, MCP_GATE):
+        for port in published_ports(compose, name):
+            problems.append(f"{name} publishes {port}")
+    return problems
+
+
+def mcp_holds_no_credential(compose: dict) -> list[str]:
+    """No secret, token, password or key in its environment, no way to the database, no
+    dependency on the API, and it talks to the gate, not to the API."""
+    problems = []
+    svc = service(compose, MCP)
+    env = svc.get("environment") or {}
+    for name in env:
+        if re.search(
+            r"TOKEN|SECRET|PASSWORD|KEY|DATABASE|POSTGRES|CREDENTIAL", name, re.I
+        ):
+            problems.append(f"mcp is given {name}")
+    if env.get("API_BASE_URL") != "http://mcp-gate:8081":
+        problems.append(
+            f"mcp's API_BASE_URL is {env.get('API_BASE_URL')!r}, not the gate"
+        )
+    if "api" in (svc.get("depends_on") or {}):
+        problems.append("mcp depends on the api")
+    if svc.get("volumes"):
+        problems.append("mcp mounts a volume")
+    if svc.get("env_file"):
+        problems.append("mcp reads an env_file, which could hold anything")
+    # The API's second lock is the gate's to hold, never the service's.
+    if "PROXY_SHARED_SECRET" not in (
+        service(compose, MCP_GATE).get("environment") or {}
+    ):
+        problems.append("the gate does not hold PROXY_SHARED_SECRET")
+    return problems
+
+
+def mcp_is_hardened(compose: dict) -> list[str]:
+    problems = []
+    for name in (MCP, MCP_GATE):
+        svc = service(compose, name)
+        if svc.get("read_only") is not True:
+            problems.append(f"{name} does not have a read-only root filesystem")
+        if "ALL" not in [str(c).upper() for c in svc.get("cap_drop", [])]:
+            problems.append(f"{name} does not cap_drop ALL")
+    adds = {str(c).upper() for c in service(compose, MCP).get("cap_add", [])}
+    if adds:
+        problems.append(f"mcp adds back capabilities: {sorted(adds)}")
+    adds = {str(c).upper() for c in service(compose, MCP_GATE).get("cap_add", [])}
+    if adds - {"NET_BIND_SERVICE"}:
+        problems.append(
+            f"mcp-gate adds back more than NET_BIND_SERVICE: {sorted(adds)}"
+        )
+    user = str(service(compose, MCP_GATE).get("user", "")).split(":")[0]
+    if user in NON_ROOT:
+        problems.append("mcp-gate runs as root: set a numeric non-root user")
+    image = str(service(compose, MCP_GATE).get("image", ""))
+    if not re.fullmatch(r"caddy:\d+@sha256:[0-9a-f]{64}", image):
+        problems.append(f"mcp-gate's image is {image!r}, not pinned by digest")
+    return problems
+
+
+def mcp_image_is_unprivileged(dockerfile: str) -> list[str]:
+    """mcp/Dockerfile: built like the API's. Non-root, no shell, no pip, locked."""
+    problems = []
+    froms = re.findall(r"^FROM (\S+)", dockerfile, re.M)
+    if not froms or not all(re.search(r"@sha256:[0-9a-f]{64}$", f) for f in froms):
+        problems.append(f"a base image is not pinned by digest: {froms}")
+    if not re.search(r"^USER [1-9]\d*(:[1-9]\d*)?$", dockerfile, re.M):
+        problems.append("no numeric non-root USER")
+    if "--shell /usr/sbin/nologin" not in dockerfile:
+        problems.append("its user has a login shell")
+    if "--require-hashes" not in dockerfile:
+        problems.append("the lock is not verified by hash")
+    if "pip uninstall" not in dockerfile:
+        problems.append("pip stays in the runtime image")
+    if not re.search(r"^HEALTHCHECK ", dockerfile, re.M):
+        problems.append("no HEALTHCHECK")
+    cmd = re.findall(r"^CMD (.*)$", dockerfile, re.M)
+    if not cmd or not cmd[-1].startswith('["'):
+        problems.append("CMD is not in exec form (a shell would run it)")
+    if re.search(r"^CMD .*\bsh\b", dockerfile, re.M):
+        problems.append("CMD runs a shell")
+    return problems
+
+
+def mcp_default_set_is_off(compose_cli) -> list[str]:
+    """What compose itself says `up` would start, with and without the profile."""
+    plain, with_profile = compose_cli(), compose_cli("--profile", MCP_PROFILE)
+    problems = []
+    if plain is None:
+        return ["docker compose is not available to ask"]
+    if {MCP, MCP_GATE} & set(plain):
+        problems.append(f"a bare `up` starts {sorted({MCP, MCP_GATE} & set(plain))}")
+    if not {MCP, MCP_GATE} <= set(with_profile or []):
+        problems.append("the profile does not start mcp and mcp-gate")
+    return problems
+
+
+def compose_services(*flags: str) -> list[str] | None:
+    """`docker compose config --services`, as compose resolves it."""
+    import os
+    import shutil
+    import subprocess
+
+    if not shutil.which("docker"):
+        return None
+    env = {
+        **os.environ,
+        "POSTGRES_PASSWORD": "x",
+        "IDENTITY_ID_SOURCE": "x",
+    }
+    done = subprocess.run(
+        ["docker", "compose", *flags, "-f", str(COMPOSE), "config", "--services"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=ROOT,
+    )
+    return done.stdout.split() if done.returncode == 0 else None
+
+
 def every_rule(compose: dict) -> list[str]:
     return [
         *api_ports(compose),
@@ -435,6 +604,13 @@ def every_rule(compose: dict) -> list[str]:
         *one_build_for_page_and_rules(compose),
         *cloud_proxy_image_is_unprivileged(
             (ROOT / "proxy" / "Dockerfile").read_text(encoding="utf-8")
+        ),
+        *mcp_is_off_unless_asked(compose),
+        *mcp_has_a_network_of_its_own(compose),
+        *mcp_holds_no_credential(compose),
+        *mcp_is_hardened(compose),
+        *mcp_image_is_unprivileged(
+            (ROOT / "mcp" / "Dockerfile").read_text(encoding="utf-8")
         ),
     ]
 
@@ -755,6 +931,184 @@ def main() -> int:
     build_mutation(
         "migrate mounting the whole build",
         lambda s: s[MIGRATE]["volumes"].append(f"{APP_DIR_DEFAULT}:/srv/app:ro"),
+    )
+
+    # --- the MCP service (#164): off unless asked, alone on its network, no credential
+    def mcp_mutation(label: str, rule, mutate) -> None:
+        broken = copy.deepcopy(compose)
+        mutate(broken)
+        check(f"{label} is noticed", bool(rule(broken)))
+
+    s_ = lambda c: c["services"]  # noqa: E731
+    mcp_mutation(
+        "the mcp service without its profile (on by default)",
+        mcp_is_off_unless_asked,
+        lambda c: s_(c)[MCP].pop("profiles"),
+    )
+    mcp_mutation(
+        "the gate without its profile",
+        mcp_is_off_unless_asked,
+        lambda c: s_(c)[MCP_GATE].pop("profiles"),
+    )
+    mcp_mutation(
+        "the mcp service in another profile as well",
+        mcp_is_off_unless_asked,
+        lambda c: s_(c)[MCP].update(profiles=[MCP_PROFILE, "default"]),
+    )
+    mcp_mutation(
+        "a new service with no profile",
+        mcp_is_off_unless_asked,
+        lambda c: s_(c).update(extra={"image": "x"}),
+    )
+    mcp_mutation(
+        "mcp on the edge network",
+        mcp_has_a_network_of_its_own,
+        lambda c: s_(c)[MCP].update(networks=[AGENT, EDGE]),
+    )
+    mcp_mutation(
+        "mcp on the data network",
+        mcp_has_a_network_of_its_own,
+        lambda c: s_(c)[MCP].update(networks=[AGENT, DATA]),
+    )
+    mcp_mutation(
+        "the agent network made routable",
+        mcp_has_a_network_of_its_own,
+        lambda c: c["networks"][AGENT].update(internal=False),
+    )
+    mcp_mutation(
+        "the proxy on the agent network",
+        mcp_has_a_network_of_its_own,
+        lambda c: s_(c)[PROXY].update(networks=[EDGE, AGENT]),
+    )
+    mcp_mutation(
+        "the api on the agent network",
+        mcp_has_a_network_of_its_own,
+        lambda c: s_(c)[API].update(networks=[EDGE, DATA, AGENT]),
+    )
+    mcp_mutation(
+        "a published port on mcp",
+        mcp_has_a_network_of_its_own,
+        lambda c: s_(c)[MCP].update(ports=["8000:8000"]),
+    )
+    mcp_mutation(
+        "a published port on the gate",
+        mcp_has_a_network_of_its_own,
+        lambda c: s_(c)[MCP_GATE].update(ports=["8082:8082"]),
+    )
+    mcp_mutation(
+        "a stranger on the agent network",
+        mcp_has_a_network_of_its_own,
+        lambda c: s_(c).update(other={"image": "x", "networks": [AGENT]}),
+    )
+    for var in ("MCP_TOKEN", "AGENT_ID_SECRET", "POSTGRES_PASSWORD", "API_KEY"):
+        mcp_mutation(
+            f"{var} given to mcp",
+            mcp_holds_no_credential,
+            lambda c, var=var: s_(c)[MCP]["environment"].update({var: "x"}),
+        )
+    mcp_mutation(
+        "mcp talking to the api directly",
+        mcp_holds_no_credential,
+        lambda c: s_(c)[MCP]["environment"].update(API_BASE_URL="http://api:8000"),
+    )
+    mcp_mutation(
+        "mcp depending on the api",
+        mcp_holds_no_credential,
+        lambda c: s_(c)[MCP].update(
+            depends_on={"api": {"condition": "service_started"}}
+        ),
+    )
+    mcp_mutation(
+        "mcp with an env file",
+        mcp_holds_no_credential,
+        lambda c: s_(c)[MCP].update(env_file=[".env"]),
+    )
+    mcp_mutation(
+        "the gate without the shared secret",
+        mcp_holds_no_credential,
+        lambda c: s_(c)[MCP_GATE]["environment"].pop("PROXY_SHARED_SECRET"),
+    )
+    mcp_mutation(
+        "mcp with a writable root filesystem",
+        mcp_is_hardened,
+        lambda c: s_(c)[MCP].update(read_only=False),
+    )
+    mcp_mutation(
+        "mcp keeping its capabilities",
+        mcp_is_hardened,
+        lambda c: s_(c)[MCP].pop("cap_drop"),
+    )
+    mcp_mutation(
+        "mcp adding a capability back",
+        mcp_is_hardened,
+        lambda c: s_(c)[MCP].update(cap_add=["NET_ADMIN"]),
+    )
+    mcp_mutation(
+        "the gate running as root",
+        mcp_is_hardened,
+        lambda c: s_(c)[MCP_GATE].update(user="0:0"),
+    )
+    mcp_mutation(
+        "the gate's image unpinned",
+        mcp_is_hardened,
+        lambda c: s_(c)[MCP_GATE].update(image="caddy:2"),
+    )
+    mcp_mutation(
+        "the mcp service unconfined",
+        container_hardening,
+        lambda c: s_(c)[MCP].pop("security_opt"),
+    )
+
+    real_mcp = (ROOT / "mcp" / "Dockerfile").read_text(encoding="utf-8")
+    check(
+        "the mcp image: the real Dockerfile passes",
+        not mcp_image_is_unprivileged(real_mcp),
+    )
+    for label, old, new in (
+        ("dropping USER", "USER 10002:10002", ""),
+        ("USER root", "USER 10002:10002", "USER 0:0"),
+        ("a login shell", "--shell /usr/sbin/nologin", "--shell /bin/bash"),
+        ("an unlocked install", "--require-hashes", ""),
+        ("keeping pip", "&& /opt/venv/bin/pip uninstall --yes pip setuptools", ""),
+        ("a floating base image", "python:3.12-slim@sha256:", "python:3.12-slim#"),
+        ("no health check", "HEALTHCHECK", "# HEALTHCHECK"),
+        (
+            "a shell-form CMD",
+            'CMD ["python", "-m", "chai_mcp"]',
+            "CMD python -m chai_mcp",
+        ),
+    ):
+        check(
+            f"the mcp image: {label} is noticed",
+            bool(mcp_image_is_unprivileged(real_mcp.replace(old, new))),
+        )
+
+    asked = mcp_default_set_is_off(compose_services)
+    docker_there = compose_services() is not None
+    if docker_there:
+        check(
+            "compose itself: a bare `up` leaves mcp off, the profile starts it",
+            not asked,
+            "; ".join(asked),
+        )
+        check(
+            "compose itself: a bare `up` starts exactly the default services",
+            set(compose_services() or []) == DEFAULT_SERVICES,
+            str(compose_services()),
+        )
+    else:
+        check(
+            "docker compose is available to ask what `up` starts",
+            not os.environ.get("REQUIRE_TESTS"),
+            "docker compose is not available (REQUIRE_TESTS is set)",
+        )
+    check(
+        "a profile that starts mcp by default is noticed by the compose check",
+        bool(
+            mcp_default_set_is_off(
+                lambda *f: [MCP, MCP_GATE, "db"] if not f else [MCP, MCP_GATE]
+            )
+        ),
     )
 
     real = (ROOT / "proxy" / "Dockerfile").read_text(encoding="utf-8")

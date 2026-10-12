@@ -37,7 +37,7 @@ The rest of the API:
 | `GET /api/principals?ids=a,b,c` | Names and emails for identity ids, for people the caller can already see (below) |
 | `GET /api/projects/{id}/versions`, `.../versions/{rev}` | The revision list, and one revision, for anyone who can read the project. A purged revision answers empty with `purged: true` |
 | `GET /api/events` | One event per change, for as long as the stream is held |
-| `GET /api/agent/me`, `/api/agent/portfolio`, `/api/agent/projects/{ref}` | The read-only agent API: stored statuses, decisions and dates, people and projects as opaque ids, answered to a per-user bearer token and no other credential. Off until `AGENT_ID_SECRET` is set ([The agent API](../docs/agent-api.md)) |
+| `GET /api/agent/me`, `/api/agent/portfolio`, `/api/agent/projects/{ref}` | The read-only agent API: stored statuses, decisions and dates, people and projects as opaque ids, answered to a per-user bearer token and no other credential. Off until `AGENT_ID_SECRET` is set ([The agent API](../docs/agent-api.md)). An optional, separate [MCP service](../mcp/README.md) wraps these three routes for chatbots |
 | `POST`, `GET /api/agent-tokens`, `DELETE /api/agent-tokens/{id}` | Mint, list and revoke your own agent tokens, with the session, never with a token |
 
 Every read of a record is also written to `access_event`, in the transaction of

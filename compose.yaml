@@ -394,6 +394,11 @@ services:
       AUTH_HEADER_NAME: ${AUTH_HEADER_NAME:-X-Auth-Request-Name}
       AUTH_HEADER_EMAIL: ${AUTH_HEADER_EMAIL:-X-Auth-Request-Email}
 
+      # Where POST /mcp goes: the `mcp-gate` service of the `agent-mcp` profile (#164).
+      # Nothing answers there unless the profile is running, and the proxy then
+      # answers 502 on /mcp. docs/mcp.md.
+      MCP_UPSTREAM: ${MCP_UPSTREAM:-mcp-gate:8082}
+
     depends_on:
       api:
         # Only `service_started`, not `service_healthy`, and on purpose: the
@@ -440,6 +445,99 @@ services:
     cpus: 0.5
     pids_limit: 32
 
+  # ---------------------------------------------------------------------------
+  # THE MCP SERVICE (#164, R-73, D-91). OFF BY DEFAULT: both services below are in the
+  # `agent-mcp` profile, so `docker compose up` does not start them.
+  #
+  #   docker compose --profile agent-mcp up -d
+  #
+  # A chatbot's way to ask the three read-only agent routes about the portfolio. It
+  # holds no credential: each request carries its own person's bearer token, which is
+  # forwarded for that request and stored nowhere. Read docs/mcp.md first, including
+  # what answering a model discloses and who decides that.
+  #
+  # Two services, one network of their own (`agent`, internal: true):
+  #
+  #   proxy -> mcp-gate -> mcp          the chatbot's request, in
+  #   mcp -> mcp-gate -> api            the same token, on to the agent routes
+  #
+  # `mcp` is on `agent` and nothing else. It is the one service that parses a chatbot's
+  # requests, so it cannot reach the API, the database or the proxy's sign-on listener:
+  # only `mcp-gate`, a Caddy that serves the three GET routes and the one MCP path.
+  # ---------------------------------------------------------------------------
+  mcp-gate:
+    profiles: ["agent-mcp"]
+    logging: *default-logging
+    image: caddy:2@sha256:8dc9fa87b36b25303d1c67d2a09f5824b7f3bfd72cb052f246e5da2133fe29a8
+    restart: unless-stopped
+    # As the proxy: unprivileged, and the one capability the stock binary's file
+    # capability needs. Its config and data go to a tmpfs (nothing here is kept).
+    user: "65532:65532"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: ${MCP_GATE_MEM_LIMIT:-128m}
+    cpus: ${MCP_GATE_CPUS:-1}
+    pids_limit: 128
+    # Deliberately NO `ports:`: only the proxy (on `edge`) and mcp (on `agent`) reach it.
+    networks:
+      - edge   # to reach the API, and to be reached by the proxy
+      - agent  # to be reached by mcp, and to reach it
+    volumes:
+      - ./proxy/Caddyfile.mcp-gate:/etc/caddy/Caddyfile:ro
+    environment:
+      XDG_CONFIG_HOME: /tmp
+      XDG_DATA_HOME: /tmp
+      # The API's second lock, if set. The MCP service never sees it: this gate does.
+      PROXY_SHARED_SECRET: ${PROXY_SHARED_SECRET:-}
+      MCP_UPSTREAM: mcp:8000
+    depends_on:
+      api:
+        condition: service_started
+
+  mcp:
+    profiles: ["agent-mcp"]
+    logging: *default-logging
+    image: ${MCP_IMAGE:-chai-governance-mcp:local}
+    build:
+      context: ./mcp
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: ${MCP_MEM_LIMIT:-256m}
+    cpus: ${MCP_CPUS:-1}
+    pids_limit: 128
+    # Deliberately NO `ports:` and ONLY the internal `agent` network. THIS IS THE
+    # SECURITY PROPERTY of this service: it can reach mcp-gate and nothing else.
+    networks:
+      - agent
+    environment:
+      # Where it sends the caller's token: the gate's listener for the three routes.
+      API_BASE_URL: http://mcp-gate:8081
+      # REQUIRED to start: the host name people reach /mcp by, as the browser or the
+      # client sends it in the Host header (DNS-rebinding protection). No default.
+      MCP_ALLOWED_HOSTS: ${MCP_ALLOWED_HOSTS:-}
+      # Browser origins that may call it. Empty by default: a page in a browser cannot.
+      MCP_ALLOWED_ORIGINS: ${MCP_ALLOWED_ORIGINS:-}
+      MCP_PORT: "8000"
+      MCP_MAX_BODY_BYTES: ${MCP_MAX_BODY_BYTES:-65536}
+      MCP_TIMEOUT_SECONDS: ${MCP_TIMEOUT_SECONDS:-10}
+      MCP_MAX_IN_FLIGHT: ${MCP_MAX_IN_FLIGHT:-16}
+    depends_on:
+      mcp-gate:
+        condition: service_started
+
 # -----------------------------------------------------------------------------
 # PERSISTENCE
 #
@@ -470,5 +568,11 @@ networks:
   # outside the host can route to them. Postgres is on this network and no
   # other.
   data:
+    driver: bridge
+    internal: true
+
+  # The MCP service's own network (the `agent-mcp` profile). Internal, so it has no
+  # route off the host, and its only members are `mcp` and `mcp-gate`.
+  agent:
     driver: bridge
     internal: true

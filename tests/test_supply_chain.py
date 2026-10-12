@@ -16,6 +16,7 @@ stops noticing is itself noticed, plus (with Docker) a build of the real image.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -113,6 +114,8 @@ def dependabot_problems(config: dict) -> list[str]:
         ("pip", "/server", "requirements.txt"),
         ("docker", "/server", "Dockerfile"),
         ("docker", "/proxy", "Dockerfile"),
+        ("pip", "/mcp", "requirements.txt"),
+        ("docker", "/mcp", "Dockerfile"),
         ("docker-compose", "/", "compose.yaml"),
         ("github-actions", "/", ".github/workflows"),
     }
@@ -238,11 +241,40 @@ def main() -> int:
         re.search(r"pip uninstall[^\n]*\bpip\b", server_df) is not None,
     )
 
+    print("The MCP service's dependencies are locked, with hashes (#164)")
+    mcp_lock = (ROOT / "mcp" / "requirements.txt").read_text(encoding="utf-8")
+    mcp_deps = tomllib.loads((ROOT / "mcp" / "pyproject.toml").read_text())["project"][
+        "dependencies"
+    ]
+    mcp_df = (ROOT / "mcp" / "Dockerfile").read_text(encoding="utf-8")
+    check(
+        "every locked MCP requirement is pinned and hashed",
+        not unpinned_lock_lines(mcp_lock),
+        str(unpinned_lock_lines(mcp_lock)[:3]),
+    )
+    check(
+        "every MCP dependency is in its lock",
+        not lock_misses(mcp_lock, mcp_deps),
+        str(lock_misses(mcp_lock, mcp_deps)),
+    )
+    check(
+        "the MCP image installs only from the lock, verifying hashes, and ships no pip",
+        "--require-hashes" in mcp_df
+        and "requirements.txt" in mcp_df
+        and re.search(r"pip uninstall[^\n]*\bpip\b", mcp_df) is not None
+        and "--upgrade pip" not in mcp_df,
+    )
+
     print("Base images are pinned by digest")
     check(
         "the API image's bases are pinned",
         not floating_from_lines(server_df),
         str(floating_from_lines(server_df)),
+    )
+    check(
+        "the MCP image's bases are pinned",
+        not floating_from_lines(mcp_df),
+        str(floating_from_lines(mcp_df)),
     )
     check(
         "the proxy image's base is pinned",
@@ -432,6 +464,73 @@ def main() -> int:
                 f"{versions.stdout.strip()} vs {locked}",
             )
         subprocess.run(["docker", "rmi", "-f", tag], capture_output=True)
+
+        print("The MCP image builds from its lock, ships no pip, and runs unprivileged")
+        mcp_tag = "chai-supply-chain-test-mcp"
+        built = subprocess.run(
+            ["docker", "build", "-q", "-t", mcp_tag, str(ROOT / "mcp")],
+            capture_output=True,
+            text=True,
+        )
+        check("the MCP image builds", built.returncode == 0, built.stderr[-400:])
+        if built.returncode == 0:
+
+            def in_image(*args: str) -> subprocess.CompletedProcess:
+                return subprocess.run(
+                    [
+                        "docker",
+                        "run",
+                        "--rm",
+                        "--entrypoint",
+                        "/opt/venv/bin/python",
+                        mcp_tag,
+                        *args,
+                    ],
+                    capture_output=True,
+                    text=True,
+                )
+
+            imp = in_image("-c", "import mcp, httpx, pydantic, uvicorn; print('ok')")
+            check(
+                "the MCP image's locked dependencies import",
+                imp.stdout.strip() == "ok",
+                imp.stderr[-300:],
+            )
+            check(
+                "pip is not in the MCP runtime image",
+                in_image("-m", "pip", "--version").returncode != 0,
+            )
+            locked = re.search(r"^mcp==([\d.]+)", mcp_lock, re.M).group(1)
+            got = in_image(
+                "-c", "import importlib.metadata as m; print(m.version('mcp'))"
+            )
+            check(
+                "the installed MCP SDK is the locked one",
+                got.stdout.strip() == locked,
+                f"{got.stdout.strip()} vs {locked}",
+            )
+            facts = json.loads(
+                subprocess.run(
+                    ["docker", "inspect", mcp_tag], capture_output=True, text=True
+                ).stdout
+            )[0]["Config"]
+            check(
+                "it runs as a numeric non-root user, has a health check, and is "
+                "started directly, not through a shell",
+                facts["User"] not in ("", "0", "root")
+                and facts["User"].split(":")[0].isdigit()
+                and facts["Healthcheck"]["Test"][0] == "CMD"
+                and facts["Cmd"] == ["python", "-m", "chai_mcp"]
+                and not facts.get("Entrypoint"),
+                str({k: facts.get(k) for k in ("User", "Cmd", "Entrypoint")}),
+            )
+            shell = in_image("-c", "import pwd; print(pwd.getpwuid(10002).pw_shell)")
+            check(
+                "its user has no login shell",
+                shell.stdout.strip() == "/usr/sbin/nologin",
+                shell.stdout + shell.stderr,
+            )
+        subprocess.run(["docker", "rmi", "-f", mcp_tag], capture_output=True)
     elif REQUIRE_TESTS:
         check("docker is available to build the image", False, "REQUIRE_TESTS is set")
     else:

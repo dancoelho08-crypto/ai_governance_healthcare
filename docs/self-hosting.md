@@ -305,6 +305,20 @@ as described above. If a front door of yours sits in front of Caddy and
 authenticates every path, it has to let `/api/agent/` through, or the agent API
 cannot be used; the page says how, per front door, and says where it cannot be done.
 
+#### The optional MCP service
+
+A read-only [MCP server](mcp.md) for an interactive chatbot is a **separate
+service in a compose profile, off by default**: `docker compose up` does not
+start it, and `docker compose --profile agent-mcp up -d` does. It needs the agent
+API on (`AGENT_ID_SECRET`) and `MCP_ALLOWED_HOSTS` set, and it forwards each
+caller's own token to the agent routes, holding none of its own. Two services
+start with the profile: `mcp`, alone on an internal network, and `mcp-gate`, a
+small Caddy that is the only thing `mcp` can reach and the only thing the
+proxy's `/mcp` route talks to. The proxy's `/mcp` route skips the sign-on like
+the agent API's, deletes every identity header and sets none; with the profile
+off it answers `502`. Sending answers to a model is a disclosure only the
+operator can decide: read [the MCP page](mcp.md#should-you-turn-it-on) first.
+
 ### How the containers are locked down
 
 The proxy is the only service reachable from outside, so it gets the strictest

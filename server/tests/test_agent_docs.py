@@ -576,12 +576,19 @@ def test_every_documented_setting_is_read_listed_and_passed_on() -> None:
 
 
 def test_the_page_names_no_client_and_no_model() -> None:
+    """The page names no client and no model. It points to the MCP server's own page
+    (D-91, which amends D-89 decision 5: that page names an example model and one
+    neutral client mention, and this one still names neither), so the word "MCP" is
+    allowed in that one pointer and nowhere else."""
     lowered = TEXT.lower()
     for word in (
         "claude", "anthropic", "openai", "chatgpt", "gpt-", "gemini", "copilot",
-        "llama", "mistral", "medgemma", "openmed", "mcp", "cursor",
+        "llama", "mistral", "medgemma", "openmed", "cursor",
     ):  # fmt: skip
         assert word not in lowered, word
+    pointer = next(p for p in TEXT.split("\n\n") if "(mcp.md)" in p)
+    assert pointer.lower().count("mcp") == lowered.count("mcp")
+    assert "mcp" not in lowered.replace(pointer.lower(), "")
 
 
 def test_the_page_is_in_the_navigation() -> None:

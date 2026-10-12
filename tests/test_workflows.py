@@ -121,6 +121,23 @@ def no_server_pytest(workflow: dict) -> list[str]:
     return [] if ran else ["the server job does not run pytest from server/"]
 
 
+def no_mcp_pytest(workflow: dict) -> list[str]:
+    """The MCP service's own pytest (mcp/tests, #164) runs in the server job, against
+    the same PostgreSQL, with its package installed."""
+    steps = jobs(workflow).get(SERVER_JOB, {}).get("steps", [])
+    problems = []
+    if not any(
+        "pytest" in step.get("run", "") and step.get("working-directory") == "mcp"
+        for step in steps
+    ):
+        problems.append("the server job does not run pytest from mcp/")
+    if not any(
+        "pip install" in s.get("run", "") and "mcp[dev]" in s["run"] for s in steps
+    ):
+        problems.append("the server job does not install the MCP service's package")
+    return problems
+
+
 def skips_allowed(workflow: dict) -> list[str]:
     value = str((workflow.get("env") or {}).get(REQUIRE_VAR, ""))
     return (
@@ -261,6 +278,7 @@ def every_rule(
         *untested_tasks(workflow, tasks),
         *orphan_tests(tasks, files),
         *no_server_pytest(workflow),
+        *no_mcp_pytest(workflow),
         *skips_allowed(workflow),
         *swallowed_failures(workflow),
         *missing_timeouts(workflow),
@@ -380,6 +398,19 @@ def main() -> int:
     for step in jobs(broken)[SERVER_JOB]["steps"]:
         step.pop("working-directory", None)
     check("pytest not run from server/ is noticed", bool(no_server_pytest(broken)))
+
+    broken = copy.deepcopy(workflow)
+    for step in jobs(broken)[SERVER_JOB]["steps"]:
+        if step.get("working-directory") == "mcp":
+            step.pop("working-directory")
+    check("pytest not run from mcp/ is noticed", bool(no_mcp_pytest(broken)))
+    broken = copy.deepcopy(workflow)
+    jobs(broken)[SERVER_JOB]["steps"] = [
+        s
+        for s in jobs(broken)[SERVER_JOB]["steps"]
+        if "mcp[dev]" not in s.get("run", "")
+    ]
+    check("the MCP package not installed is noticed", bool(no_mcp_pytest(broken)))
 
     broken = copy.deepcopy(workflow)
     jobs(broken)[AGGREGATE_JOB]["needs"].remove("stack")

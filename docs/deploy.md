@@ -726,6 +726,23 @@ proxy in
 this repository is tested for the route; the rest is the platform's own documented
 behavior, and you should confirm it in your environment before relying on it.
 
+#### The optional MCP service's path, and each front door
+
+The optional [MCP server](mcp.md) (a compose profile, off by default) adds one
+more path that a program with no single sign-on session calls: `POST /mcp`. Like
+the agent API's, it must reach the proxy **without** the front door asking for a
+sign-in, and nothing else may. [The MCP page](mcp.md#let-mcp-through-your-front-door)
+lists what to do for each front door (the AWS ALB, Azure Easy Auth, oauth2-proxy
+and
+nginx, Google Cloud IAP, a gateway, and this stack's own Caddy), and where it
+cannot be done: a front door that authenticates every path and cannot be told
+otherwise cannot offer it, and the profile should stay off there. Only the proxy
+in this repository is tested for the route. The profile needs a place for its two
+small containers next to the proxy (`mcp-gate` and `mcp`, on a network of their
+own), and `MCP_ALLOWED_HOSTS` set to the host name the **service** sees, which a
+front door that rewrites `Host` changes. Serve it over HTTPS only, since a token
+travels in every request.
+
 ### Plain headers versus signed assertions
 
 Every front door sets a convenient plaintext header such as

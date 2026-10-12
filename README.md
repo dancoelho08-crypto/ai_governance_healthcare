@@ -109,6 +109,9 @@ because it speaks plain HTTP and expects TLS to be terminated in front of it.
   and Azure (Easy Auth), each with a *Close the back door* section. Those
   sections are not hardening; they are the deployment. The API trusts an
   identity header, so it must be unreachable except through the proxy.
+- **[The agent API](docs/agent-api.md)** and **[the MCP server](docs/mcp.md)**:
+  read-only access for an assistant or an interactive chatbot, through a token a
+  person mints for themselves. Both are off unless an operator turns them on.
 - **[Privacy and retention](docs/privacy.md)**: what personal data the server
   holds, how long, and how it is disposed of.
 

@@ -12,6 +12,11 @@ exact HTTP of every endpoint, and what an operator does to switch it on.
 The agent API is **off** until an operator sets `AGENT_ID_SECRET`. Nothing
 described here exists on a server where it is not set.
 
+For an interactive chatbot there is an optional, read-only [MCP
+server](mcp.md) over these three routes. It is a separate service, off by
+default, and it forwards each caller's own token to the routes below; it adds
+nothing the agent API does not already return.
+
 ## What it is, and what it is not
 
 | It is | It is not |

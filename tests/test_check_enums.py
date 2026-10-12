@@ -153,6 +153,15 @@ def new_shapes() -> None:
     check("an ES module", ce.language_of("app/x.mjs") is ce.Lang.JAVASCRIPT)
     check("TypeScript", ce.language_of("app/x.ts") is ce.Lang.JAVASCRIPT)
     check("server tests exempt", ce.language_of("server/tests/x.py") is None)
+    check("mcp tests exempt", ce.language_of("mcp/tests/x.py") is None)
+    check(
+        "mcp application code is checked",
+        ce.language_of("mcp/chai_mcp/x.py") is not None,
+    )
+    check(
+        "a tests directory elsewhere in mcp is not exempt",
+        ce.language_of("mcp/chai_mcp/tests/x.py") is not None,
+    )
     check("top-level tests exempt", ce.language_of("tests/x.py") is None)
     check(
         "a directory merely named tests is NOT exempt",
@@ -364,8 +373,14 @@ def main() -> int:
         check("a payload with no file exits 0", code == 0, str(code))
 
         print("The hook after a Bash edit (no file named in the payload)")
+        import os
         import subprocess
 
+        # Run from a git hook (prek), GIT_INDEX_FILE and friends point at the REAL
+        # repository, so `git add -A` here would stage into it. This temporary
+        # repository must be the only one git can see.
+        for name in [n for n in os.environ if n.startswith("GIT_")]:
+            del os.environ[name]
         subprocess.run(["git", "init", "-q"], cwd=root, check=True)
         subprocess.run(["git", "config", "user.email", "t@t"], cwd=root, check=True)
         subprocess.run(["git", "config", "user.name", "t"], cwd=root, check=True)

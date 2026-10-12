@@ -27,6 +27,7 @@ allowed is a claim that looks enforced and is not.
 
 Evidence is one of:
     server/tests/x.py::TestK::test_name    a pytest test, found by `def`/`class`
+    mcp/tests/x.py::test_name              the same, for the MCP service (#164)
     tests/test_x.py::a check name          a script suite's check("...") text
     tests/test_x.py                        the whole file
     .pre-commit-config.yaml::hook-id       a hook, which CI runs through prek
@@ -82,6 +83,8 @@ ISSUE = re.compile(r"#\d+")
 PYTEST_NAME = re.compile(r"(Test\w+|test_\w+)")
 PRECOMMIT_REF = ".pre-commit-config.yaml"
 SERVER_TESTS = "server/tests/"
+# The optional MCP service's own pytest suite (#164), run from mcp/ in the server job.
+MCP_TESTS = "mcp/tests/"
 SCRIPT_TESTS = "tests/"
 
 
@@ -194,6 +197,12 @@ def _ci_problem(path: str, ctx: Context) -> str | None:
             and "working-directory: server" in ctx.workflow_text
         )
         return None if ran else "CI does not run pytest from server/"
+    if path.startswith(MCP_TESTS):
+        ran = (
+            "pytest" in ctx.workflow_text
+            and "working-directory: mcp" in ctx.workflow_text
+        )
+        return None if ran else "CI does not run pytest from mcp/"
     if path.startswith(SCRIPT_TESTS) and path.endswith(".py"):
         tasks = [t for t, cmd in ctx.pixi_tasks.items() if path in cmd]
         if not tasks:
@@ -202,8 +211,8 @@ def _ci_problem(path: str, ctx: Context) -> str | None:
             return None
         return f"CI never runs {', '.join(tasks)}"
     return (
-        f"{path} is not something CI runs (evidence is server/tests, a tests/ suite "
-        "with a pixi task CI runs, or a pre-commit hook)"
+        f"{path} is not something CI runs (evidence is server/tests, mcp/tests, "
+        "a tests/ suite with a pixi task CI runs, or a pre-commit hook)"
     )
 
 
