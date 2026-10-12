@@ -147,13 +147,38 @@ everyone's with `make agent-tokens` ([below](#revoking-tokens)).
 | The owner's access to a project is removed | The project drops out of what the token sees on its next call. Access is checked on every call. |
 | The owner is removed from your **identity provider** | **Nothing happens in this app.** The app does not see your directory. The token keeps working until it expires (at most 8 hours) or an operator revokes it. If someone leaves in a hurry, revoke their tokens: `make agent-tokens REVOKE=1 WHO=<their id>`. |
 
+### Creating, seeing and revoking tokens: the Agent access page
+
+A signed-in person creates and ends their own tokens on the **Agent access** page
+of the dashboard (the button is on the portfolio, next to *New project*). It
+explains what a token lets a program do, has a field for an optional label, and
+lists your tokens with when each was made, when it expires and when it was last
+used. It is open to every role: a token reads only what you can already see.
+
+- **Create a token.** The token appears once, in a panel with a Copy button. The
+  page shows the token once and the browser keeps it nowhere: not in storage, the
+  address or the history. Press *I have copied it* when it is in your secret store,
+  and the page forgets it. Leaving the page, changing the language or closing it
+  does the same, so copy it before you do any of those.
+- **The label** is a name for your own list. The label is shown to you only, as
+  text, and an agent is never shown it.
+- **Revoke.** Revoke asks first, sends one request, and the list shows the token as
+  revoked. It stops working on its next call. (An operator can revoke too:
+  [below](#revoking-tokens).)
+- **Limits** are the ones above: 8 hours, at most 5 live tokens (a sixth is refused
+  with a message that says so), and a rate limit on the token routes.
+- **Not on every deployment.** The page is offered only when the dashboard is served
+  by the app's server; the browser-only copy has no server to create a token. And on
+  a server where `AGENT_ID_SECRET` is not set the page says that agent access is off,
+  because the token routes answer `404` (nothing in `/api/health` says so).
+
 ### Minting through the API
 
-The token routes use the signed-in session, exactly as the dashboard does, so
-they are called from a browser tab where you are signed in, or from a command line
-that carries the same identity (the local development stack has a fixed one). A
-page in the dashboard for minting, listing and revoking is planned; until it
-exists, from the browser console of the signed-in dashboard:
+The token routes use the signed-in session, exactly as the dashboard does, so a
+script calls them from a browser tab where you are signed in, or from a command line
+that carries the same identity (the local development stack has a fixed one). The
+page above is the way to do it by hand; this is for a script. From the browser
+console of the signed-in dashboard:
 
 ```js
 await (await fetch("/api/agent-tokens", {
@@ -162,6 +187,8 @@ await (await fetch("/api/agent-tokens", {
   body: JSON.stringify({label: "my assistant"}),
 })).json()
 ```
+
+Whatever runs this holds the token the same way: in its secret store, not in a log.
 
 ### `POST /api/agent-tokens`
 

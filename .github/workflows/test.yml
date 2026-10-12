@@ -263,6 +263,9 @@ jobs:
       - name: a refused save is sent once, kept, and explained
         if: ${{ !cancelled() }}
         run: pixi run test-save-refused
+      - name: the agent access page mints, lists and revokes, and never keeps the token
+        if: ${{ !cancelled() }}
+        run: pixi run test-agent-access
       - name: user ids become people
         if: ${{ !cancelled() }}
         run: pixi run test-people

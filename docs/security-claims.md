@@ -1818,6 +1818,64 @@ honestly as `unenforced`. See [CLAUDE.md](https://github.com/tonyreina/ai_govern
   `server/tests/test_agent_vocabulary.py::test_the_api_role_may_only_read_the_vocabulary`
   `server/tests/test_agent_mutations.py::test_each_guard_is_noticed_when_broken`
 
+### C-119 The agent token is shown once and the browser never keeps it
+
+- **Claim:** The page that creates an agent token shows it once, in one element, and
+  it is gone when the person dismisses it, leaves the page, changes language or closes
+  the page. It is never in browser storage, the address, the history, the change log,
+  a toast, the console, a pending save, the projects or the store, and never in a
+  live region (R-72).
+- **Asserted in:** `app/i18n/en.json` — "It is shown once, when you create it, and cannot be shown again."
+- **Asserted in:** `app/i18n/en.json` — "Copy it now. You will not see this token again."
+- **Asserted in:** `docs/agent-api.md` — "The page shows the token once and the browser keeps it nowhere"
+- **Status:** enforced
+- **Enforced by:**
+  `tests/test_agent_access.py::the token is in one element only`
+  `tests/test_agent_access.py::and in no place a page keeps things`
+  `tests/test_agent_access.py::the token is nowhere, DOM included`
+  `tests/test_agent_access.py::a change of language draws the page again without the token`
+  `tests/test_agent_access.py::going back to the portfolio clears it`
+  `tests/test_agent_access.py::and coming back does not show it again`
+  `tests/test_agent_access.py::the page closing clears it`
+  `tests/test_agent_access.py::the live regions are live and never hold it`
+  `tests/test_agent_access.py::a secret the server should never send is neither kept nor shown`
+  `tests/test_agent_access.py::Mutations of the built page are each noticed`
+
+### C-120 A token's label and the server's words are text on the agent page
+
+- **Claim:** The label a person gives a token, and anything the server says in
+  answering the page, is set as text and never as markup, so a label or a refusal
+  carrying markup shows as characters and runs nothing.
+- **Asserted in:** `docs/agent-api.md` — "The label is shown to you only, as text"
+- **Status:** enforced
+- **Enforced by:**
+  `tests/test_agent_access.py::a label with markup is text`
+  `tests/test_agent_access.py::a refusal quotes the server as text, capped`
+  `tests/test_agent_access.py::Mutations of the built page are each noticed`
+
+### C-121 A person revokes their own token from the page, after being asked
+
+- **Claim:** The page revokes a token only after a confirmation, sends exactly one
+  revoke for it, and shows the token as revoked afterward.
+- **Asserted in:** `docs/agent-api.md` — "Revoke asks first, sends one request, and the list shows the token as revoked."
+- **Status:** enforced
+- **Enforced by:**
+  `tests/test_agent_access.py::Cancel sends nothing`
+  `tests/test_agent_access.py::DELETE was sent once, for that token`
+  `tests/test_agent_access.py::the list shows it revoked, with no button`
+  `tests/test_agent_access.py::Mutations of the built page are each noticed`
+
+### C-122 The agent access page is offered only where there is a server
+
+- **Claim:** The browser-only copy has no agent access page and sends no request
+  for one, because there is no server to create a token (R-72).
+- **Asserted in:** `docs/agent-api.md` — "The page is offered only when the dashboard is served by the app's server"
+- **Status:** enforced
+- **Enforced by:**
+  `tests/test_agent_access.py::no button in the browser-only copy`
+  `tests/test_agent_access.py::and opening it does nothing`
+  `tests/test_agent_access.py::Mutations of the built page are each noticed`
+
 ### C-123 The MCP service is off unless its profile is asked for
 
 - **Claim:** A plain `docker compose up` starts neither the MCP service nor its

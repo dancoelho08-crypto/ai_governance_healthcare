@@ -170,10 +170,12 @@ def main() -> int:
             "rules.blocked",
             "rules.othersSave",
         }
+        # And the agent access page's two warnings (#164, R-55): English until reviewed.
+        agent = {"agent.storeWarning", "agent.shownOnce"}
         check(
             "every safety string but the new neutral footers and the rules banner"
             " has a Chinese reviewer",
-            sorted(reviewers) == sorted(set(safety) - neutral - rules)
+            sorted(reviewers) == sorted(set(safety) - neutral - rules - agent)
             and all("Cody Chen" in reviewers[k] for k in reviewers),
             str(sorted(set(safety) ^ set(reviewers))),
         )
@@ -183,6 +185,11 @@ def main() -> int:
             and zh.evaluate("t('engine.md.footer', {name: 'X'})").startswith(
                 "Structured"
             ),
+        )
+        check(
+            "and the agent token warnings are safety-bearing, so they show in English",
+            agent <= set(safety)
+            and zh.evaluate("t('agent.shownOnce')").startswith("Copy it now"),
         )
         check(
             "and the rules banner is safety-bearing, so it shows in English in Chinese",

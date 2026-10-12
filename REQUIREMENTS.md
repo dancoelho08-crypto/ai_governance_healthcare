@@ -1421,6 +1421,32 @@ honest answer and is a gap worth closing; see R-19.
   `tests/test_agent_tokens.py` (the operator's revoke), and
   `tests/test_stack.py` (the whole stack); claims C-97 to C-111.
 
+### R-72 The browser never keeps an agent token
+
+- Status: Active
+- The page where a person creates agent tokens (R-71) shows a token once and
+  keeps it nowhere:
+    - **One variable, one element.** The token is held in one JavaScript variable
+      and shown as the text of one element, never as markup, never in a live
+      region (a screen reader would read it aloud).
+    - **Gone on dismiss, on leaving and on a redraw.** "I have copied it", leaving
+      the page for the portfolio or a project, a change of language and the page
+      closing each clear the variable and remove the element.
+    - **Never persisted or leaked.** Not browser storage, the address, the history
+      or change log, a toast, the console, a pending save, the list of
+      projects or the store. The list of tokens is built from an allowlist of
+      public fields, so a secret a server sent there would not be shown or kept
+      either.
+    - **Server mode only.** A browser-only copy has no server to mint from, so the
+      page is not offered there.
+    - **Any role.** A reader may create a token, as R-71 says; the page is not
+      read-only-gated.
+- Source: #164 (PR 2) and the owner's decisions of 2026-10-10 (a user mints their
+  own tokens; 8 hours; revoke their own; no free text in v1); R-71; D-90.
+- Enforced by: `tests/test_agent_access.py` (the canary token swept through every
+  place a page keeps things, after dismiss, a language change, leaving and coming
+  back; each guard broken in a copy and noticed); claims C-119 to C-122.
+
 ### R-73 The MCP server is a read-only, optional wrapper that holds no credential
 
 - Status: Active
