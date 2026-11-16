@@ -14,7 +14,7 @@
 # Nothing in this image refers to its directory by name, so the build context
 # can be ./server or ./api without edits.
 
-FROM python:3.12-slim@sha256:05cda9777409a9c3ffddd94a4c476b79f0769a0b4857f0c7ed9226b6800b0d6f AS build
+FROM python:3.15-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928 AS build
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1
@@ -35,7 +35,7 @@ RUN python -m venv /opt/venv \
 # scanners (rightly) flag, in a place the application can never use them (#37).
 
 
-FROM python:3.12-slim@sha256:05cda9777409a9c3ffddd94a4c476b79f0769a0b4857f0c7ed9226b6800b0d6f AS runtime
+FROM python:3.15-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928 AS runtime
 
 # PYTHONUNBUFFERED: without it, logs sit in a pipe buffer and a container that
 # dies takes its last words with it.
