@@ -51,7 +51,7 @@ services:
     # unreadable and needs pg_upgrade or a dump/restore. A floating tag would
     # make that happen by surprise on some unrelated `docker compose pull`.
     logging: *default-logging
-    image: postgres:17@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3
+    image: postgres:19@sha256:bb6e70add742cd868fb62cb3b2f67d1dd2bdd2b65a521e778420748753687c60
     restart: unless-stopped
 
     # Container baseline (#50). The cluster's entrypoint starts as root and drops
